@@ -4,11 +4,11 @@
 
 **Goal:** Build a public, clone-based GitHub template repo that produces strict-OKF-profile Markdown wikis with a deterministic Node build/lint and optional Python ingest.
 
-**Architecture:** Markdown under `wiki/` (+ source material in `raw/`) is canonical. `build.mjs` renders `site/` HTML and, with `--check`, validates the OKF profile. Pure logic lives in `lib/okf.mjs` (unit-tested); the generator composes it. Links are standard Markdown (repo-root-relative); `index.md`/`log.md` are OKF reserved no-frontmatter files. `AGENTS.md` is the canonical agent doc; `CLAUDE.md` shims to it.
+**Architecture:** Markdown under `wiki/` (+ source material in `raw/`) is canonical. `build.mjs` renders `site/` HTML and, with `--check`, validates the OKF profile. Pure helpers live in `lib/okf.mjs` (unit-tested); the generator composes them and uses `marked`'s token API for link handling. Links are standard Markdown (repo-root-relative) targeting wiki concepts; `index.md`/`log.md` are OKF reserved no-frontmatter files. `AGENTS.md` is the canonical agent doc; `CLAUDE.md` shims to it.
 
 **Tech Stack:** Node ≥20 (`node --test`), `gray-matter`, `marked`; optional Python ingest via `uv`; git.
 
-**Spec:** `docs/superpowers/specs/2026-06-27-okf-wiki-template-design.md` (read it first).
+**Spec:** `docs/superpowers/specs/2026-06-27-okf-wiki-template-design.md` (read it first — especially "Bundle scope & link roots").
 
 ## Global Constraints
 
@@ -17,11 +17,12 @@ These apply to every task. Exact values copied from the spec.
 - **Node ≥ 20.** `package.json` `engines.node` = `">=20"`. Test runner is `node --test` only.
 - **Pinned deps:** `gray-matter` `4.0.3`, `marked` `18.0.5`.
 - **Bundle root = repo root.** Absolute links start at repo root: `/wiki/<topic>/<slug>.md`.
-- **OKF validation scope = `wiki/**` + `raw/**` only.** Never validate `README.md`, `AGENTS.md`, `CLAUDE.md`, `docs/**`, or `ingest/**`.
+- **OKF validation scope = `wiki/**` + `raw/**` only** for frontmatter/`type`. Never validate `README.md`, `AGENTS.md`, `CLAUDE.md`, `docs/**`, or `ingest/**`.
+- **Link resolution = `wiki/` concept bodies only.** Body `.md` links must resolve to an existing `wiki/<topic>/<slug>.md` concept. `raw/` docs are NOT link-validated. Links to `raw/`, to reserved files, that escape repo root, or with no target → **fail `check`**.
 - **Concept type rules:** `raw/**` → `source`; `wiki/<topic>/<slug>.md` → one of `concept | pattern | worked-example`. Reserved `index.md`/`log.md` are exempt and MUST have **no frontmatter**.
 - **Canonical fields:** `description` (summary), `timestamp` (ISO 8601), `resource` (optional URI). `status` is a permitted custom key. No `[[wikilinks]]`, no `related:`, no auto-generated `## References` — external sources go in a body `# Citations` section.
-- **Unresolved local `.md` link fails `check`** (non-zero exit), even though base OKF tolerates broken links.
 - **`build.mjs` reads the wiki name from `package.json` `name`** — never hardcode it.
+- **Slugs are kebab-case** (`[a-z0-9-]+`); link/file paths contain no spaces or parentheses.
 - **Git:** work on branch `feat/okf-template-infra`; Conventional Commits; **no `Co-Authored-By`/AI attribution**. Do not push without explicit go-ahead.
 
 ---
@@ -31,15 +32,15 @@ These apply to every task. Exact values copied from the spec.
 - `package.json` — name (read by build), `engines`, deps, scripts (`build`/`check`/`test`; `ingest` added in Task 6).
 - `topics.json` — `{ "order": [...] }` topic ordering.
 - `assets/wiki.css` — styles for generated `site/` (copied from education-wiki, verbatim).
-- `lib/okf.mjs` — **pure** helpers: `esc`, `summary`, `isReserved`, `typeViolation`, `extractMarkdownLinks`, `isLocalMd`, `resolveLinkTarget`, `siteRelFromRepoRel`. No I/O. (Task 2)
-- `build.mjs` — generator + `--check` validator. Composes `lib/okf.mjs`. (Task 3)
+- `lib/okf.mjs` — **pure** helpers: `esc`, `summary`, `isReserved`, `typeViolation`, `isLocalMd`, `resolveLinkTarget`, `siteRelFromRepoRel`. No I/O, no deps. (Task 2)
+- `build.mjs` — generator + `--check` validator. Composes `lib/okf.mjs`; uses `marked` tokens for link extraction/rewrite. Exports `localMdLinksIn` for testing; runs `main()` only when invoked directly. (Task 3)
 - `wiki/getting-started/index.md` — reserved, no frontmatter, intro prose. (Task 3)
 - `wiki/getting-started/welcome.md`, `writing-concepts.md` — example concepts, cross-linked, with `# Citations`. (Task 3)
 - `raw/.gitkeep` — keeps empty source dir. (Task 3)
-- `test/okf.test.mjs` — unit tests for `lib/okf.mjs`. (Task 2)
-- `test/build-check.test.mjs` — end-to-end: check passes, build emits expected HTML, broken-link/frontmatter violations are caught. (Task 4)
+- `test/okf.test.mjs` — unit tests for `lib/okf.mjs` (pure helpers). (Task 2)
+- `test/build-check.test.mjs` — link-extraction unit tests + end-to-end build/check via subprocess. (Task 4)
 - `AGENTS.md`, `CLAUDE.md`, `README.md` — docs. (Task 5)
-- `ingest/`, `scripts/ingest.mjs` — optional Python pipeline. (Task 6)
+- `ingest/`, `scripts/ingest.mjs` — optional Python pipeline, patched to strict profile. (Task 6)
 
 ---
 
@@ -99,7 +100,7 @@ touch raw/.gitkeep
 Run: `npm install`
 Expected: exits 0; creates `package-lock.json` and `node_modules/`.
 
-Run: `node -e "import('gray-matter').then(m=>import('marked')).then(()=>console.log('deps ok'))"`
+Run: `node -e "import('gray-matter').then(()=>import('marked')).then(()=>console.log('deps ok'))"`
 Expected: prints `deps ok`.
 
 - [ ] **Step 6: Commit**
@@ -118,15 +119,14 @@ git commit -m "chore: scaffold okf-wiki-template (package, topics, assets)"
 - Test: `test/okf.test.mjs`
 
 **Interfaces:**
-- Produces (all pure, no I/O):
-  - `esc(s: string) => string` — HTML-escape `& < >`.
-  - `summary(data: object) => string` — returns `data.description ?? ''`.
-  - `isReserved(base: string) => boolean` — true for `index.md`/`log.md`.
-  - `typeViolation({ area: 'raw'|'wiki', type?: string }) => string|null` — null if valid, else message. `raw`→`source`; `wiki`→`concept|pattern|worked-example`. Reserved files are handled by the caller (never passed here).
-  - `extractMarkdownLinks(md: string) => string[]` — link targets (first token only, `<>` stripped), excluding images.
-  - `isLocalMd(target: string) => boolean` — true for non-URL, non-anchor `.md` (optionally `#frag`) targets.
-  - `resolveLinkTarget(fromDir: string, target: string) => string` — repo-root-relative posix path. `/`-prefixed → from repo root; otherwise resolved against `fromDir`. Drops any `#frag`.
-  - `siteRelFromRepoRel(repoRel: string) => string` — `wiki/<t>/<s>.md` → `<t>/<s>.html` (strips leading `wiki/`, swaps extension).
+- Produces (all pure, no I/O, no deps):
+  - `esc(s) => string` — HTML-escape `& < >`.
+  - `summary(data) => string` — `data.description ?? ''`.
+  - `isReserved(base) => boolean` — true for `index.md`/`log.md`.
+  - `typeViolation({ area, type }) => string|null` — null if valid. `raw`→`source`; `wiki`→`concept|pattern|worked-example`. Reserved files are filtered by the caller and never passed here.
+  - `isLocalMd(target) => boolean` — true for non-URL, non-anchor `.md` (optionally `#frag`) targets; false for images/URLs/anchors.
+  - `resolveLinkTarget(fromDir, target) => string|null` — repo-root-relative posix path; `/`-prefixed → from repo root, else resolved against `fromDir`; drops `#frag`. **Returns `null` if the path escapes the repo root.**
+  - `siteRelFromRepoRel(repoRel) => string` — `wiki/<t>/<s>.md` → `<t>/<s>.html`.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -136,7 +136,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   esc, summary, isReserved, typeViolation,
-  extractMarkdownLinks, isLocalMd, resolveLinkTarget, siteRelFromRepoRel,
+  isLocalMd, resolveLinkTarget, siteRelFromRepoRel,
 } from '../lib/okf.mjs';
 
 test('esc escapes HTML metacharacters', () => {
@@ -164,11 +164,6 @@ test('typeViolation enforces area -> type for concepts', () => {
   assert.match(typeViolation({ area: 'wiki', type: 'banana' }), /expected one of/);
 });
 
-test('extractMarkdownLinks pulls link targets, ignores images', () => {
-  const md = 'see [a](./x.md) and [b](/wiki/t/y.md "T") not ![img](z.png)';
-  assert.deepEqual(extractMarkdownLinks(md), ['./x.md', '/wiki/t/y.md', 'z.png']);
-});
-
 test('isLocalMd recognizes local .md links only', () => {
   assert.equal(isLocalMd('./x.md'), true);
   assert.equal(isLocalMd('/wiki/t/y.md#sec'), true);
@@ -183,6 +178,10 @@ test('resolveLinkTarget resolves absolute and relative to repo root', () => {
   assert.equal(resolveLinkTarget('wiki/getting-started', '../other/z.md#frag'), 'wiki/other/z.md');
 });
 
+test('resolveLinkTarget returns null when the path escapes repo root', () => {
+  assert.equal(resolveLinkTarget('wiki', '../../escape.md'), null);
+});
+
 test('siteRelFromRepoRel maps wiki md path to site html path', () => {
   assert.equal(siteRelFromRepoRel('wiki/getting-started/welcome.md'), 'getting-started/welcome.html');
 });
@@ -191,12 +190,12 @@ test('siteRelFromRepoRel maps wiki md path to site html path', () => {
 - [ ] **Step 2: Run the tests to verify they fail**
 
 Run: `npm test`
-Expected: FAIL — `Cannot find module '../lib/okf.mjs'` (or undefined exports).
+Expected: FAIL — `Cannot find module '../lib/okf.mjs'`.
 
 - [ ] **Step 3: Implement `lib/okf.mjs`**
 
 ```js
-// Pure OKF-profile helpers shared by build.mjs and tests. No I/O.
+// Pure OKF-profile helpers shared by build.mjs and tests. No I/O, no deps.
 
 export const WIKI_CONCEPT_TYPES = ['concept', 'pattern', 'worked-example'];
 const RESERVED = ['index.md', 'log.md'];
@@ -221,22 +220,14 @@ export function typeViolation({ area, type }) {
   return `unknown area "${area}"`;
 }
 
-// [text](target) / [text](target "title") -> ['target', ...]. Images (![..](..)) are skipped.
-export function extractMarkdownLinks(md) {
-  const out = [];
-  const re = /(^|[^!])\[[^\]]*\]\(\s*<?([^)\s>]+)>?(?:\s+"[^"]*")?\s*\)/g;
-  let m;
-  while ((m = re.exec(md)) !== null) out.push(m[2].trim());
-  return out;
-}
-
 export const isLocalMd = (target) =>
   !/^[a-z][a-z0-9+.-]*:\/\//i.test(target) &&
   !target.startsWith('#') &&
   /\.md(#.*)?$/.test(target);
 
 // Resolve a link target to a repo-root-relative posix path (no leading slash). Drops #frag.
-// Bundle root = repo root: a leading '/' is relative to repo root.
+// Bundle root = repo root: a leading '/' is relative to repo root. Returns null if the
+// path escapes the repo root (a '..' with nothing left to pop).
 export function resolveLinkTarget(fromDir, target) {
   const clean = target.split('#')[0];
   const startParts = clean.startsWith('/') ? [] : (fromDir ? fromDir.split('/') : []);
@@ -244,8 +235,12 @@ export function resolveLinkTarget(fromDir, target) {
   const stack = [];
   for (const part of parts) {
     if (part === '.' || part === '') continue;
-    if (part === '..') stack.pop();
-    else stack.push(part);
+    if (part === '..') {
+      if (stack.length === 0) return null;
+      stack.pop();
+    } else {
+      stack.push(part);
+    }
   }
   return stack.join('/');
 }
@@ -277,7 +272,7 @@ git commit -m "feat: add pure OKF-profile helpers with unit tests"
 
 **Interfaces:**
 - Consumes: all exports from `lib/okf.mjs` (Task 2).
-- Produces: `node build.mjs` writes `site/`; `node build.mjs --check` validates and exits non-zero on any problem. The example bundle MUST pass `check` and `build` cleanly.
+- Produces: `node build.mjs` writes `site/`; `node build.mjs --check` validates and exits non-zero on any problem. Exports `localMdLinksIn(md) => string[]` (local `.md` link hrefs via marked tokens, images/code excluded) for tests. `main()` runs only when the file is invoked directly. The example bundle MUST pass `check` and `build`.
 
 - [ ] **Step 1: Create the example reserved index (no frontmatter)**
 
@@ -333,7 +328,8 @@ One concept per file. Required frontmatter is `type`; recommended: `title`, `des
 `tags`, `timestamp`. Use an absolute, repo-root link to point back to the
 [welcome page](/wiki/getting-started/welcome.md).
 
-External sources belong under a `# Citations` heading, not in frontmatter.
+External sources belong under a `# Citations` heading, not in frontmatter. To cite source
+material under `raw/`, reference it as inline code like `raw/getting-started/notes.md`.
 
 # Citations
 
@@ -346,14 +342,15 @@ External sources belong under a `# Citations` heading, not in frontmatter.
 #!/usr/bin/env node
 // okf-wiki-template generator: wiki/**/*.md -> site/ (deterministic, no LLM).
 // Strict OKF profile. Markdown in wiki/ is canonical; site/ is generated — never hand-edit it.
-import { readFileSync, writeFileSync, readdirSync, mkdirSync, existsSync, rmSync, cpSync } from 'node:fs';
-import { join, dirname, relative, basename } from 'node:path';
+import { readFileSync, writeFileSync, readdirSync, mkdirSync, existsSync, rmSync, cpSync, realpathSync } from 'node:fs';
+import { join, dirname, relative, basename, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { argv } from 'node:process';
 import matter from 'gray-matter';
 import { marked } from 'marked';
 import {
   esc, summary, isReserved, typeViolation,
-  extractMarkdownLinks, isLocalMd, resolveLinkTarget, siteRelFromRepoRel,
+  isLocalMd, resolveLinkTarget, siteRelFromRepoRel,
 } from './lib/okf.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
@@ -361,7 +358,7 @@ const WIKI_DIR = join(ROOT, 'wiki');
 const RAW_DIR = join(ROOT, 'raw');
 const SITE_DIR = join(ROOT, 'site');
 const ASSETS_SRC = join(ROOT, 'assets');
-const CHECK = process.argv.includes('--check');
+const CHECK = argv.includes('--check');
 const TOPICS = JSON.parse(readFileSync(join(ROOT, 'topics.json'), 'utf8'));
 const PKG = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'));
 const WIKI_NAME = PKG.name;
@@ -382,19 +379,45 @@ function walk(dir) {
   return out;
 }
 
-// --- markdown rendering -----------------------------------------------------
+// --- link handling via marked tokens (skips code blocks/spans; parses parens correctly) ---
 
-function preprocessLinks(md, fromDir, outDir) {
-  return md.replace(/(\]\()(\s*<?[^)\s>]+>?)(\s+"[^"]*")?(\s*\))/g, (whole, open, rawTarget, title, close) => {
-    const t = rawTarget.trim().replace(/^</, '').replace(/>$/, '');
-    if (!isLocalMd(t)) return whole;
-    const [path, hash] = t.split('#');
-    const repoTarget = resolveLinkTarget(fromDir, path);
-    const siteAbs = join(SITE_DIR, siteRelFromRepoRel(repoTarget));
-    const href = (toPosix(relative(outDir, siteAbs)) || basename(siteAbs)) + (hash ? `#${hash}` : '');
-    return `${open}${href}${title || ''}${close}`;
+// Return local .md link hrefs found in a markdown string (images excluded — they are
+// `image` tokens, not `link`). Exported for tests.
+export function localMdLinksIn(md) {
+  const out = [];
+  const tokens = marked.lexer(md);
+  marked.walkTokens(tokens, (tok) => {
+    if (tok.type === 'link' && isLocalMd(tok.href)) out.push(tok.href);
   });
+  return out;
 }
+
+// Rendering context for renderer.link (single-threaded; set before each parse).
+let LINKCTX = { fromDir: '', outDir: SITE_DIR };
+
+function rewriteHref(href) {
+  if (!isLocalMd(href)) return href;
+  const [path, hash] = href.split('#');
+  const repoTarget = resolveLinkTarget(LINKCTX.fromDir, path);
+  if (repoTarget === null) return href; // escapes root; check reports it as broken
+  const siteAbs = join(SITE_DIR, siteRelFromRepoRel(repoTarget));
+  return (toPosix(relative(LINKCTX.outDir, siteAbs)) || basename(siteAbs)) + (hash ? `#${hash}` : '');
+}
+
+const renderer = new marked.Renderer();
+renderer.code = ({ text, lang: infostring }) => {
+  const info = (infostring || '').trim();
+  const title = (info.match(/title="([^"]*)"/) || [])[1];
+  const lang = info.split(/\s+/)[0] || '';
+  const head = title || lang;
+  return `<div class="code-block">${head ? `<div class="code-head">${esc(head)}</div>` : ''}<pre><code>${esc(text)}</code></pre></div>`;
+};
+renderer.link = function ({ href, title, tokens }) {
+  const text = this.parser.parseInline(tokens);
+  const t = title ? ` title="${esc(title)}"` : '';
+  return `<a href="${esc(rewriteHref(href))}"${t}>${text}</a>`;
+};
+marked.use({ renderer });
 
 function preprocessAlerts(md) {
   const lines = md.split('\n');
@@ -414,18 +437,10 @@ function preprocessAlerts(md) {
   return out.join('\n');
 }
 
-const renderer = new marked.Renderer();
-renderer.code = ({ text, lang: infostring }) => {
-  const info = (infostring || '').trim();
-  const title = (info.match(/title="([^"]*)"/) || [])[1];
-  const lang = info.split(/\s+/)[0] || '';
-  const head = title || lang;
-  return `<div class="code-block">${head ? `<div class="code-head">${esc(head)}</div>` : ''}<pre><code>${esc(text)}</code></pre></div>`;
-};
-marked.use({ renderer });
-
-const renderMarkdown = (md, fromDir, outDir) =>
-  marked.parse(preprocessAlerts(preprocessLinks(md, fromDir, outDir)));
+function renderMarkdown(md, fromDir, outDir) {
+  LINKCTX = { fromDir, outDir };
+  return marked.parse(preprocessAlerts(md));
+}
 
 // --- collect ----------------------------------------------------------------
 
@@ -455,11 +470,13 @@ function collect() {
 
 function validate({ concepts, reserved, rawDocs }) {
   const problems = [];
-  const allMd = new Set([...walk(WIKI_DIR), ...walk(RAW_DIR)].map(rootRel));
+  const conceptPaths = new Set(concepts.map((c) => c.repoRel)); // linkable targets
 
+  // reserved files (index.md / log.md, in wiki/ or raw/) must have no frontmatter
   for (const r of [...reserved, ...rawDocs.filter((d) => d.reserved)]) {
     if (hasFrontmatter(r.raw)) problems.push(`${r.repoRel} -> reserved file (${r.base}) must have no frontmatter`);
   }
+  // concept type rules
   for (const c of concepts) {
     const v = typeViolation({ area: 'wiki', type: c.data.type });
     if (v) problems.push(`${c.key} -> ${v}`);
@@ -469,15 +486,18 @@ function validate({ concepts, reserved, rawDocs }) {
     const v = typeViolation({ area: 'raw', type: d.data.type });
     if (v) problems.push(`${d.repoRel} -> ${v}`);
   }
+  // every ordered topic has a directory
   for (const topic of TOPICS.order) {
     if (!existsSync(join(WIKI_DIR, topic))) problems.push(`topic "${topic}" -> no wiki/${topic}/ directory`);
   }
+  // wiki concept body links must resolve to an existing wiki concept
   for (const c of concepts) {
     const fromDir = dirname(c.repoRel);
-    for (const target of extractMarkdownLinks(c.content)) {
-      if (!isLocalMd(target)) continue;
-      const repoTarget = resolveLinkTarget(fromDir, target);
-      if (!allMd.has(repoTarget)) problems.push(`${c.key} -> broken link ${target} (no such file)`);
+    for (const href of localMdLinksIn(c.content)) {
+      const repoTarget = resolveLinkTarget(fromDir, href);
+      if (repoTarget === null || !conceptPaths.has(repoTarget)) {
+        problems.push(`${c.key} -> broken link ${href} (must point to an existing wiki concept)`);
+      }
     }
   }
   return problems;
@@ -594,7 +614,9 @@ function main() {
   console.log(`built ${collected.concepts.length} concepts -> site/`);
 }
 
-main();
+// Run only when invoked directly (so tests can import helpers without side effects).
+const invokedDirectly = argv[1] && realpathSync(resolve(argv[1])) === realpathSync(fileURLToPath(import.meta.url));
+if (invokedDirectly) main();
 ```
 
 - [ ] **Step 5: Run `check` and verify it passes on the example**
@@ -605,12 +627,12 @@ Expected: prints `check ok: 2 concepts, 0 problems`; exit 0.
 - [ ] **Step 6: Run `build` and verify the site is generated**
 
 Run: `npm run build && ls site site/getting-started`
-Expected: `built 2 concepts -> site/`; `site/index.html`, `site/getting-started/index.html`, `welcome.html`, `writing-concepts.html`, and `site/assets/wiki.css` exist.
+Expected: `built 2 concepts -> site/`; files `site/index.html`, `site/getting-started/index.html`, `welcome.html`, `writing-concepts.html`, `site/assets/wiki.css` exist.
 
 - [ ] **Step 7: Spot-check the rewritten link**
 
 Run: `grep -o 'href="[^"]*welcome.html"' site/getting-started/writing-concepts.html`
-Expected: a relative href like `href="welcome.html"` (the `/wiki/getting-started/welcome.md` link rewritten to a sibling `.html`).
+Expected: `href="welcome.html"` — the `/wiki/getting-started/welcome.md` link rewritten to a sibling `.html` (NOT `.md`).
 
 - [ ] **Step 8: Commit**
 
@@ -621,14 +643,14 @@ git commit -m "feat: add strict-OKF build/check generator and example bundle"
 
 ---
 
-## Task 4: End-to-end conformance test
+## Task 4: Tests — link extraction unit tests + end-to-end conformance
 
 **Files:**
 - Create: `test/build-check.test.mjs`
 
 **Interfaces:**
-- Consumes: `build.mjs` via `node --test` subprocess + temp-dir fixtures.
-- Produces: regression coverage that `check` passes the example, catches a broken link, and catches frontmatter on a reserved file.
+- Consumes: `localMdLinksIn` imported from `build.mjs`; `build.mjs` run as a subprocess against temp-dir fixtures (with `node_modules` symlinked so deps resolve).
+- Produces: coverage that link extraction excludes images/code; that `check` passes the example; that build emits valid HTML with a rewritten, resolving link; and that the profile's negatives (broken link, reserved frontmatter, bad concept type, bad raw type, missing type) fail `check`.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -637,71 +659,128 @@ git commit -m "feat: add strict-OKF build/check generator and example bundle"
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, cpSync, writeFileSync, rmSync, existsSync } from 'node:fs';
+import { mkdtempSync, cpSync, writeFileSync, readFileSync, rmSync, existsSync, symlinkSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { localMdLinksIn } from '../build.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
+
+// --- unit: link extraction via marked tokens --------------------------------
+
+test('localMdLinksIn returns local .md links only', () => {
+  assert.deepEqual(localMdLinksIn('see [a](./x.md) and [b](/wiki/t/y.md "T")'), ['./x.md', '/wiki/t/y.md']);
+});
+
+test('localMdLinksIn excludes images and external URLs', () => {
+  assert.deepEqual(localMdLinksIn('![img](z.md) and [e](https://e.com/x.md)'), []);
+});
+
+test('localMdLinksIn ignores links inside fenced code blocks', () => {
+  assert.deepEqual(localMdLinksIn('text\n\n```\n[x](./missing.md)\n```\n'), []);
+});
+
+test('localMdLinksIn handles parentheses in the destination', () => {
+  assert.deepEqual(localMdLinksIn('[x](<./a (b).md>)'), ['./a (b).md']);
+});
+
+// --- e2e helpers ------------------------------------------------------------
 
 function sandbox() {
   const dir = mkdtempSync(join(tmpdir(), 'okf-'));
   for (const p of ['build.mjs', 'lib', 'wiki', 'raw', 'assets', 'topics.json', 'package.json']) {
     cpSync(join(ROOT, p), join(dir, p), { recursive: true });
   }
+  symlinkSync(join(ROOT, 'node_modules'), join(dir, 'node_modules'), 'dir');
   return dir;
 }
 const run = (dir, ...args) => spawnSync('node', ['build.mjs', ...args], { cwd: dir, encoding: 'utf8' });
+const clean = (dir) => rmSync(dir, { recursive: true, force: true });
+
+// --- e2e: happy path --------------------------------------------------------
 
 test('check passes on the shipped example bundle', () => {
   const dir = sandbox();
   const r = run(dir, '--check');
-  rmSync(dir, { recursive: true, force: true });
+  clean(dir);
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, /check ok: 2 concepts, 0 problems/);
 });
 
-test('build emits the expected site files', () => {
+test('build emits valid HTML with a rewritten, resolving link', () => {
   const dir = sandbox();
   const r = run(dir);
-  const ok = existsSync(join(dir, 'site/index.html'))
-    && existsSync(join(dir, 'site/getting-started/welcome.html'));
-  rmSync(dir, { recursive: true, force: true });
   assert.equal(r.status, 0, r.stderr);
-  assert.ok(ok, 'expected site/index.html and site/getting-started/welcome.html');
+  const page = join(dir, 'site/getting-started/writing-concepts.html');
+  const html = readFileSync(page, 'utf8');
+  const ok = html.includes('<!DOCTYPE html>') && html.includes('<head>') && html.includes('<body>');
+  // the /wiki/.../welcome.md link must be rewritten to a relative .html that exists
+  const m = html.match(/href="([^"]*welcome\.html)"/);
+  const resolves = m && existsSync(join(dirname(page), m[1]));
+  clean(dir);
+  assert.ok(ok, 'page must have DOCTYPE/head/body');
+  assert.ok(m, 'welcome link must be rewritten to .html');
+  assert.ok(resolves, 'rewritten link target must exist');
 });
 
-test('check fails on a broken local link', () => {
+// --- e2e: profile negatives -------------------------------------------------
+
+function expectCheckFails(mutate, rx) {
   const dir = sandbox();
-  writeFileSync(join(dir, 'wiki/getting-started/welcome.md'),
-    '---\ntype: concept\ntitle: W\ndescription: d\n---\n\nSee [x](./does-not-exist.md).\n');
+  mutate(dir);
   const r = run(dir, '--check');
-  rmSync(dir, { recursive: true, force: true });
-  assert.equal(r.status, 1);
-  assert.match(r.stderr, /broken link/);
+  clean(dir);
+  assert.equal(r.status, 1, `expected non-zero exit; stdout=${r.stdout}`);
+  assert.match(r.stderr, rx);
+}
+
+test('check fails on a broken local link', () => {
+  expectCheckFails((dir) => writeFileSync(
+    join(dir, 'wiki/getting-started/welcome.md'),
+    '---\ntype: concept\ntitle: W\ndescription: d\n---\n\nSee [x](./does-not-exist.md).\n'
+  ), /broken link/);
 });
 
 test('check fails when a reserved file has frontmatter', () => {
-  const dir = sandbox();
-  writeFileSync(join(dir, 'wiki/getting-started/index.md'),
-    '---\ntype: topic\n---\n\n# Getting started\n');
-  const r = run(dir, '--check');
-  rmSync(dir, { recursive: true, force: true });
-  assert.equal(r.status, 1);
-  assert.match(r.stderr, /must have no frontmatter/);
+  expectCheckFails((dir) => writeFileSync(
+    join(dir, 'wiki/getting-started/index.md'),
+    '---\ntype: topic\n---\n\n# Getting started\n'
+  ), /must have no frontmatter/);
+});
+
+test('check fails on an invalid concept type', () => {
+  expectCheckFails((dir) => writeFileSync(
+    join(dir, 'wiki/getting-started/welcome.md'),
+    '---\ntype: banana\ntitle: W\ndescription: d\n---\n\nbody\n'
+  ), /expected one of/);
+});
+
+test('check fails on a missing concept type', () => {
+  expectCheckFails((dir) => writeFileSync(
+    join(dir, 'wiki/getting-started/welcome.md'),
+    '---\ntitle: W\ndescription: d\n---\n\nbody\n'
+  ), /missing required `type`/);
+});
+
+test('check fails on a raw file with the wrong type', () => {
+  expectCheckFails((dir) => {
+    mkdirSync(join(dir, 'raw/getting-started'), { recursive: true });
+    writeFileSync(join(dir, 'raw/getting-started/note.md'), '---\ntype: concept\ntitle: n\n---\n\nsrc\n');
+  }, /expected type "source"/);
 });
 ```
 
 - [ ] **Step 2: Run and verify the suite passes**
 
 Run: `npm test`
-Expected: PASS — `okf.test.mjs` and all four `build-check.test.mjs` tests green.
+Expected: PASS — `okf.test.mjs` plus all `build-check.test.mjs` unit and e2e tests green.
 
 - [ ] **Step 3: Commit**
 
 ```bash
 git add test/build-check.test.mjs
-git commit -m "test: add end-to-end OKF conformance checks"
+git commit -m "test: add link-extraction and end-to-end OKF conformance tests"
 ```
 
 ---
@@ -723,7 +802,7 @@ A Markdown-canonical knowledge base conforming to a **strict OKF profile** (Goog
 Format v0.1). **Markdown in `wiki/` is the source of truth. `site/` is generated — never edit it by hand.**
 
 ## Layout
-- `wiki/<topic>/<slug>.md` — atomic concept pages (one concept per file).
+- `wiki/<topic>/<slug>.md` — atomic concept pages (one concept per file). Slugs are kebab-case.
 - `wiki/<topic>/index.md` — OPTIONAL, reserved, **no frontmatter**: intro prose for the topic. The
   card listing is auto-generated from the concept files.
 - `raw/<topic>/` — immutable source material. Read, never rewrite.
@@ -748,8 +827,10 @@ status: stub | learning | researched | solid   # optional custom lifecycle key
   `log.md` = chronological update history. Both are exempt from the `type` requirement.
 
 ## Body conventions the generator understands
-- Cross-link concepts with **standard Markdown links**: `[Label](/wiki/<topic>/<slug>.md)`
+- Cross-link **concepts** with **standard Markdown links**: `[Label](/wiki/<topic>/<slug>.md)`
   (absolute, repo-root-relative — preferred) or `[Label](./<slug>.md)` (relative). No `[[wikilinks]]`.
+  A link must resolve to an existing concept; to cite `raw/` source material, reference it as inline
+  code (`` `raw/<topic>/file.md` ``) or via `resource:` — not as a clickable link.
 - External sources go under a `# Citations` heading in the body — NOT in frontmatter.
 - `> [!TIP]` / `[!NOTE]` / `[!WARNING]` / `[!CAUTION]` / `[!IMPORTANT]` → callouts.
 - ` ```lang title="…" ` → code block with a head bar. Tables, lists, headings → standard Markdown.
@@ -760,7 +841,8 @@ claim in `raw/` or a cited source. Flag third-party/unverified claims inline (e.
 Missing material → leave a `status: stub` with a note, don't fabricate.
 
 ## OKF profile (enforced by `npm run check`)
-Validation applies to `wiki/**` and `raw/**` only (never `README`/`AGENTS`/`CLAUDE`/`docs`/`ingest`).
+Frontmatter/`type` rules apply to `wiki/**` and `raw/**` (never `README`/`AGENTS`/`CLAUDE`/`docs`/`ingest`).
+Link resolution applies to `wiki/` concept bodies only (raw/ is not link-validated).
 
 | Path | required `type` |
 |------|------|
@@ -768,9 +850,10 @@ Validation applies to `wiki/**` and `raw/**` only (never `README`/`AGENTS`/`CLAU
 | `wiki/<topic>/<slug>.md` | `concept` \| `pattern` \| `worked-example` |
 | `wiki/**/index.md`, `**/log.md` | reserved — **no frontmatter** |
 
-`check` fails on: missing/wrong `type` on a concept, frontmatter on a reserved file, a topic in
-`topics.json` with no `wiki/<topic>/` directory, or an unresolved local `.md` link. This profile is
-*stricter* than base OKF on purpose; every bundle it accepts is still valid OKF v0.1.
+`check` fails on: missing/wrong `type` on a concept, wrong `type` on a raw doc, frontmatter on a
+reserved file, a topic in `topics.json` with no `wiki/<topic>/` directory, or a body `.md` link that
+does not resolve to a wiki concept. This profile is *stricter* than base OKF on purpose; every bundle
+it accepts is still valid OKF v0.1.
 
 ## Operations
 - **Build:** `npm run build`. **Lint:** `npm run check`. **Test:** `npm test`.
@@ -827,7 +910,8 @@ rm -rf ingest scripts/ingest.mjs
 ```
 
 To use it: `npm run ingest -- <source> --topic <topic> --title "..."` (requires
-[`uv`](https://docs.astral.sh/uv/)).
+[`uv`](https://docs.astral.sh/uv/)). It writes a `type: source` page to `raw/<topic>/` and drafts a
+`status: stub` concept in `wiki/<topic>/` for you to distill.
 ````
 
 - [ ] **Step 4: Verify the shim and that docs don't break `check`**
@@ -847,48 +931,120 @@ git commit -m "docs: add canonical AGENTS.md, CLAUDE shim, and README"
 
 ---
 
-## Task 6: Optional Python ingest pipeline
+## Task 6: Optional Python ingest pipeline (patched to strict profile)
 
 **Files:**
 - Create: `ingest/` (copied), `scripts/ingest.mjs` (copied)
-- Modify: `package.json` (add `ingest` script)
+- Modify: `ingest/ingest/draft.py`, `ingest/tests/test_draft.py`, `ingest/ingest/cli.py`, `package.json`
 
 **Interfaces:**
-- Consumes: education-wiki's existing ingest pipeline, verbatim.
-- Produces: `npm run ingest` wrapper; `check` must remain green (ingest is outside validation scope).
+- Consumes: education-wiki's ingest pipeline. The raw writer already emits `type: source` (conformant). The stub drafter must be patched: it currently emits dialect fields (`topic:`, `sources:`).
+- Produces: `npm run ingest` wrapper; auto-drafted stubs that conform to the strict profile (`type: concept`, `resource:`, `# Citations`, `timestamp`, no `topic:`/`sources:`). `check` must remain green (ingest is outside validation scope).
 
 - [ ] **Step 1: Copy the ingest pipeline and wrapper verbatim**
 
 ```bash
 cd ~/personal/okf-wiki-template
 cp -R ~/personal/education/education-wiki/ingest ingest
+rm -rf ingest/.venv ingest/.pytest_cache
 mkdir -p scripts
 cp ~/personal/education/education-wiki/scripts/ingest.mjs scripts/ingest.mjs
 ```
 
-- [ ] **Step 2: Add the `ingest` script to `package.json`**
+- [ ] **Step 2: Patch `ingest/ingest/draft.py` to the strict profile**
 
-In `package.json`, add to `scripts` (after `"test"`):
-```json
-    "test": "node --test",
-    "ingest": "node scripts/ingest.mjs"
+Replace the `build_stub` function (the `extract_headings` function and the two `BANNER`/`NO_OUTLINE` constants stay unchanged) with:
+```python
+def build_stub(*, title: str, raw_path: str, headings: list[str], timestamp: str) -> str:
+    front = (
+        "---\n"
+        "type: concept\n"
+        f"title: {title}\n"
+        "status: stub\n"
+        f"timestamp: {timestamp}\n"
+        f"resource: {raw_path}\n"
+        "---\n"
+    )
+    outline = (BANNER + "\n\n" + "\n\n".join(headings) + "\n") if headings else (NO_OUTLINE + "\n")
+    citations = f"\n# Citations\n\n- `{raw_path}`\n"
+    return front + "\n" + outline + citations
 ```
 
-- [ ] **Step 3: Verify `check` still passes (ingest is out of scope)**
+- [ ] **Step 3: Update `ingest/ingest/cli.py` to pass `timestamp` and drop `topic`**
+
+At the top of `cli.py`, add to the imports:
+```python
+from datetime import datetime, timezone
+```
+Then replace the stub-drafting call (currently `stub = build_stub(title=title, topic=args.topic, raw_path=rel_raw, headings=extract_headings(markdown))`) with:
+```python
+    stub = build_stub(
+        title=title,
+        raw_path=rel_raw,
+        headings=extract_headings(markdown),
+        timestamp=datetime.now(timezone.utc).isoformat(),
+    )
+```
+
+- [ ] **Step 4: Update `ingest/tests/test_draft.py` for the strict profile**
+
+Replace the two `build_stub` tests (the `extract_headings` tests stay) with:
+```python
+def test_build_stub_with_headings_is_strict_profile():
+    out = build_stub(title="Deck", raw_path="raw/system-design/deck.md",
+                     headings=["# Deck", "## Intro"], timestamp="2026-06-27T00:00:00Z")
+    assert "type: concept" in out
+    assert "status: stub" in out
+    assert "resource: raw/system-design/deck.md" in out
+    assert "timestamp: 2026-06-27T00:00:00Z" in out
+    assert "topic:" not in out          # dialect field dropped
+    assert "sources:" not in out        # dialect field dropped
+    assert "# Citations" in out
+    assert "`raw/system-design/deck.md`" in out
+    assert "auto-extracted from source — not yet distilled" in out
+    assert "# Deck" in out and "## Intro" in out
+
+
+def test_build_stub_without_headings_emits_no_outline_banner_and_no_invented_headings():
+    out = build_stub(title="Talk", raw_path="raw/system-design/talk.md",
+                     headings=[], timestamp="2026-06-27T00:00:00Z")
+    assert "no outline was extracted" in out
+    # the only heading in the body is the fixed "# Citations" section — nothing fabricated
+    body = out.split("---", 2)[-1]
+    headings = [ln for ln in body.splitlines() if ln.startswith("#")]
+    assert headings == ["# Citations"]
+```
+
+- [ ] **Step 5: Add the `ingest` script to `package.json`**
+
+In `package.json`, change the `scripts` block so it reads:
+```json
+  "scripts": {
+    "build": "node build.mjs",
+    "check": "node build.mjs --check",
+    "test": "node --test",
+    "ingest": "node scripts/ingest.mjs"
+  },
+```
+
+- [ ] **Step 6: Verify `check` still passes (ingest is out of scope)**
 
 Run: `npm run check`
 Expected: `check ok: 2 concepts, 0 problems` — `ingest/` is not validated.
 
-- [ ] **Step 4: Verify the ingest wrapper preflights `uv` cleanly**
+- [ ] **Step 7: Verify the ingest wrapper and Python tests**
 
-Run: `npm run ingest -- --help` (or with no args)
-Expected: either ingest help output, or a clear `error: uv not found ...` message if `uv` is absent — NOT a crash/stack trace. (If `uv` is installed, optionally run `cd ingest && uv run --extra dev pytest` → green.)
+Run: `npm run ingest` (no args)
+Expected: argparse usage error (exit 2) or a clear `error: uv not found ...` message — NOT a stack trace.
 
-- [ ] **Step 5: Commit**
+If `uv` is installed, run: `cd ingest && uv run --extra dev pytest -q`
+Expected: all tests pass (including the updated `test_draft.py`). If `uv` is not installed, skip this and note it.
+
+- [ ] **Step 8: Commit**
 
 ```bash
 git add ingest scripts/ingest.mjs package.json
-git commit -m "feat: add optional uv-based document ingest pipeline"
+git commit -m "feat: add optional ingest pipeline, drafting strict-profile stubs"
 ```
 
 ---
@@ -900,7 +1056,7 @@ git commit -m "feat: add optional uv-based document ingest pipeline"
 
 **Interfaces:**
 - Consumes: all prior tasks.
-- Produces: a green branch ready to merge + the exact publish commands, NOT executed.
+- Produces: a green branch + the exact publish commands, NOT executed without Het's go-ahead.
 
 - [ ] **Step 1: Full verification**
 
@@ -909,48 +1065,54 @@ Expected: check ok; site built; all tests pass. Exit 0 overall.
 
 - [ ] **Step 2: Confirm `.gitignore` covers generated/output dirs**
 
-Verify `.gitignore` contains `site/`, `node_modules/`, `ingest/.venv/`. (Created during scaffolding; add any missing line and commit.)
+Verify `.gitignore` contains `site/`, `node_modules/`, `ingest/.venv/`. (Created during scaffolding; add any missing line, then `git add .gitignore && git commit -m "chore: ignore generated and venv dirs"`.)
 
-- [ ] **Step 3: Open a PR for the infra branch**
+- [ ] **Step 3: Publish — ONLY after Het's explicit confirmation**
 
-```bash
-git push -u origin feat/okf-template-infra    # GH_HOST=github.com, remote = het-sheth/okf-wiki-template
-gh pr create --fill --base main
-```
-> Requires the remote to already exist. If it does not, STOP — repo creation is Step 4 and needs Het's go-ahead.
+> **GATE:** Do not run any command in this step without Het saying "publish it". Creating a public repo is outward-facing and effectively irreversible. Consider `--private` first and flip to public after a final look.
 
-- [ ] **Step 4: Publish — ONLY after Het's explicit confirmation**
-
-> **GATE:** Do not run this without Het saying "publish it". Creating a public repo is outward-facing and irreversible-ish.
-
+Run in order (the repo already has `main` with the spec+plan commits and the `feat/okf-template-infra` branch with the implementation):
 ```bash
 export GH_HOST=github.com
-gh repo create het-sheth/okf-wiki-template --public --source . --remote origin --push
-gh repo edit het-sheth/okf-wiki-template --template     # mark as a GitHub template repository
+
+# 1. Create the empty remote under the personal namespace and wire the origin.
+gh repo create het-sheth/okf-wiki-template --public --description "Strict OKF-profile Markdown wiki template"
+git remote add origin https://github.com/het-sheth/okf-wiki-template.git
+
+# 2. Bootstrap: push main (docs only) so it is the default branch and PRs have a base.
+git push -u origin main
+
+# 3. Push the implementation branch and open a PR into main (respects branch+PR).
+git push -u origin feat/okf-template-infra
+gh pr create --base main --head feat/okf-template-infra --fill
+
+# 4. After the PR is merged, mark the repo a GitHub template repository.
+gh repo edit het-sheth/okf-wiki-template --template
 ```
-Expected: public repo at `github.com/het-sheth/okf-wiki-template` with the "Use this template" button enabled.
+Expected: public repo at `github.com/het-sheth/okf-wiki-template`; after merge + `--template`, the "Use this template" button is enabled.
 
 ---
 
 ## Self-Review
 
 **Spec coverage:**
-- Public clone-based template, no generator → Tasks 1–6 (files), Task 7 (publish as template repo). ✓
-- Strict OKF profile (standard links, no-frontmatter `index.md`, `# Citations`, `resource`/`timestamp`) → Task 2 (`isLocalMd`/`resolveLinkTarget`/`typeViolation`), Task 3 (build/check), Task 5 (AGENTS schema). ✓
-- Bundle scope (validate `wiki/**`+`raw/**` only) → Task 3 `validate()`; verified in Task 5 Step 4 and Task 6 Step 3. ✓
-- Bundle root = repo root → Task 2 `resolveLinkTarget`, tested in Task 2 + Task 4. ✓
-- `index.md` no frontmatter, listing auto-generated → Task 3 `render()` + Task 4 reserved-frontmatter test. ✓
-- `log.md` reserved, no `type: log` convention → Task 2 `isReserved`, Task 3 `validate()`. ✓
+- Public clone-based template, no generator → Tasks 1–6 (files), Task 7 (template repo). ✓
+- Strict OKF profile (standard links, no-frontmatter `index.md`, `# Citations`, `resource`/`timestamp`) → Task 2 helpers, Task 3 build/check, Task 5 AGENTS schema. ✓
+- Bundle scope (frontmatter/type = `wiki/**`+`raw/**`; links = wiki concepts only; raw not link-validated) → Task 3 `validate()`; asserted in Task 4 (raw type test, broken-link test) and Task 5 Step 4. ✓
+- Bundle root = repo root; escape → null → broken → Task 2 `resolveLinkTarget` + test, Task 3 `validate()`. ✓
+- `index.md` no frontmatter, listing auto-generated → Task 3 `render()`/`introFor`; Task 4 reserved-frontmatter test. ✓
+- `log.md` reserved; no `type: log` convention → Task 2 `isReserved`, Task 3 `validate()`. ✓
+- Link handling robust to code blocks / parens / images → Task 3 marked-token `localMdLinksIn` + `renderer.link`; Task 4 unit tests. ✓
+- "valid HTML" = exits 0 + DOCTYPE/head/body + links resolve → Task 4 "build emits valid HTML…" test. ✓
 - AGENTS canonical + CLAUDE shim → Task 5. ✓
-- Optional ingest with exact removal → Task 6 + README (Task 5 Step 3). ✓
-- No-invent rule verbatim → Task 5 `AGENTS.md`. ✓
-- Name from `package.json` (no hardcoded `education-wiki`) → Task 3 `WIKI_NAME = PKG.name`. ✓
-- Publishing gated → Task 7 Step 4 gate. ✓
-- Node ≥20, pinned deps → Task 1 `package.json`. ✓
-- "valid HTML" = build exits 0 + files exist + links resolve → Tasks 3/4. ✓
+- Optional ingest, patched to strict profile, exact removal → Task 6 + README. ✓
+- No-invent rule verbatim → Task 5 AGENTS.md; preserved in ingest no-outline test (Task 6 Step 4). ✓
+- Name from `package.json` → Task 3 `WIKI_NAME = PKG.name`. ✓
+- Publishing gated + correct order → Task 7 Step 3. ✓
+- Node ≥20, pinned deps → Task 1. ✓
 
-**Placeholder scan:** No TBD/TODO; every code step has complete code; commands have expected output. ✓
+**Placeholder scan:** No TBD/TODO; every code step has complete code; every command has expected output. ✓
 
-**Type consistency:** Helper names match across tasks — `extractMarkdownLinks`, `isLocalMd`, `resolveLinkTarget`, `siteRelFromRepoRel`, `typeViolation({area,type})`, `summary`, `isReserved`, `esc` are defined in Task 2 and consumed with identical signatures in Tasks 3–4. ✓
+**Type consistency:** `lib/okf.mjs` exports (`esc`, `summary`, `isReserved`, `typeViolation`, `isLocalMd`, `resolveLinkTarget`, `siteRelFromRepoRel`) are defined in Task 2 and imported with identical names/signatures in Task 3. `localMdLinksIn` is defined+exported in Task 3 and imported in Task 4. `build_stub(title, raw_path, headings, timestamp)` signature is consistent across Task 6 Steps 2–4. ✓
 
 **Out of scope (per spec):** generator script, infra-sync mechanism, migrating existing wikis, hosting `site/`, W3C/WCAG validation. Not planned — correct. ✓

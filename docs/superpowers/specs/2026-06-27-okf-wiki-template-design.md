@@ -85,6 +85,14 @@ other section defers to this one.
   A leading `/` means "from repo root." Relative links (`./welcome.md`, `../other/x.md`) are also
   allowed and resolve normally. `build.mjs` rewrites local `.md` targets → the corresponding
   `site/.../*.html` path; `check` fails (non-zero exit) if a local `.md` target does not exist.
+- **Cross-links target wiki concepts only.** A body `.md` link must resolve to an existing
+  `wiki/<topic>/<slug>.md` concept (not a reserved `index.md`/`log.md`, not a `raw/` file). To cite a
+  source under `raw/`, reference it in a `# Citations` section as inline code (`` `raw/...md` ``) or
+  via the `resource:` field — not as a clickable link. A link that escapes the repo root, points at a
+  non-concept, or has no target **fails `check`**.
+- **Link resolution applies to `wiki/` concept bodies only.** `raw/` documents are immutable source
+  material (often machine-converted) and are **not** link-validated — only their frontmatter `type`
+  is checked. (Frontmatter/`type` rules still apply to both `wiki/**` and `raw/**`.)
 - **Reserved files (OKF):** `index.md` and `log.md` carry **no frontmatter** and are exempt from the
   `type` requirement. Everything else under `wiki/`/`raw/` is a concept and MUST have frontmatter +
   `type`.
