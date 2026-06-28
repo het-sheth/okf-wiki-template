@@ -1,0 +1,16 @@
+[project]
+name = "education-ingest"
+version = "0.1.0"
+description = "Document ingestion for education-wiki (MarkItDown + Docling -> OKF Markdown)"
+requires-python = ">=3.11"
+dependencies = [
+    "markitdown[all]>=0.0.1a2",
+    "docling>=2.104.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=9.1.1"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

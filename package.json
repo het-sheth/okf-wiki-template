@@ -1,0 +1,18 @@
+{
+  "name": "okf-wiki-template",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Strict OKF-profile Markdown wiki template (clone with 'Use this template').",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "build": "node build.mjs",
+    "check": "node build.mjs --check",
+    "test": "node --test",
+    "ingest": "node scripts/ingest.mjs"
+  },
+  "dependencies": {
+    "gray-matter": "4.0.3",
+    "marked": "18.0.5"
+  }
+}
