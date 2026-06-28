@@ -120,7 +120,8 @@ git commit -m "chore: scaffold okf-wiki-template (package, topics, assets)"
 
 **Interfaces:**
 - Produces (all pure, no I/O, no deps):
-  - `esc(s) => string` — HTML-escape `& < >`.
+  - `esc(s) => string` — HTML-escape `& < >` (for text content).
+  - `escAttr(s) => string` — `esc` plus `"` → `&quot;` (for HTML attribute values).
   - `summary(data) => string` — `data.description ?? ''`.
   - `isReserved(base) => boolean` — true for `index.md`/`log.md`.
   - `typeViolation({ area, type }) => string|null` — null if valid. `raw`→`source`; `wiki`→`concept|pattern|worked-example`. Reserved files are filtered by the caller and never passed here.
@@ -135,12 +136,16 @@ git commit -m "chore: scaffold okf-wiki-template (package, topics, assets)"
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  esc, summary, isReserved, typeViolation,
+  esc, escAttr, summary, isReserved, typeViolation,
   isLocalMd, resolveLinkTarget, siteRelFromRepoRel,
 } from '../lib/okf.mjs';
 
 test('esc escapes HTML metacharacters', () => {
   assert.equal(esc('a & b < c > d'), 'a &amp; b &lt; c &gt; d');
+});
+
+test('escAttr also escapes double quotes for attribute context', () => {
+  assert.equal(escAttr('a "b" & <c>'), 'a &quot;b&quot; &amp; &lt;c&gt;');
 });
 
 test('summary returns description or empty string', () => {
@@ -202,6 +207,9 @@ const RESERVED = ['index.md', 'log.md'];
 
 export const esc = (s) =>
   String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+// For HTML attribute values: esc + escape double quotes.
+export const escAttr = (s) => esc(s).replace(/"/g, '&quot;');
 
 export const summary = (data) => data.description ?? '';
 
@@ -349,7 +357,7 @@ import { argv } from 'node:process';
 import matter from 'gray-matter';
 import { marked } from 'marked';
 import {
-  esc, summary, isReserved, typeViolation,
+  esc, escAttr, summary, isReserved, typeViolation,
   isLocalMd, resolveLinkTarget, siteRelFromRepoRel,
 } from './lib/okf.mjs';
 
@@ -414,8 +422,8 @@ renderer.code = ({ text, lang: infostring }) => {
 };
 renderer.link = function ({ href, title, tokens }) {
   const text = this.parser.parseInline(tokens);
-  const t = title ? ` title="${esc(title)}"` : '';
-  return `<a href="${esc(rewriteHref(href))}"${t}>${text}</a>`;
+  const t = title ? ` title="${escAttr(title)}"` : '';
+  return `<a href="${escAttr(rewriteHref(href))}"${t}>${text}</a>`;
 };
 marked.use({ renderer });
 
@@ -934,12 +942,12 @@ git commit -m "docs: add canonical AGENTS.md, CLAUDE shim, and README"
 ## Task 6: Optional Python ingest pipeline (patched to strict profile)
 
 **Files:**
-- Create: `ingest/` (copied), `scripts/ingest.mjs` (copied)
-- Modify: `ingest/ingest/draft.py`, `ingest/tests/test_draft.py`, `ingest/ingest/cli.py`, `package.json`
+- Create: `ingest/` (copied), `scripts/ingest.mjs` (copied), `ingest/ingest/yamlsafe.py`, `ingest/tests/test_yamlsafe.py`
+- Modify: `ingest/ingest/draft.py`, `ingest/ingest/rawstore.py`, `ingest/tests/test_draft.py`, `ingest/ingest/cli.py`, `package.json`
 
 **Interfaces:**
-- Consumes: education-wiki's ingest pipeline. The raw writer already emits `type: source` (conformant). The stub drafter must be patched: it currently emits dialect fields (`topic:`, `sources:`).
-- Produces: `npm run ingest` wrapper; auto-drafted stubs that conform to the strict profile (`type: concept`, `resource:`, `# Citations`, `timestamp`, no `topic:`/`sources:`). `check` must remain green (ingest is outside validation scope).
+- Consumes: education-wiki's ingest pipeline. The raw writer already emits `type: source` (conformant) but interpolates titles into YAML unquoted; the stub drafter emits dialect fields (`topic:`, `sources:`). Both are patched.
+- Produces: `npm run ingest` wrapper; auto-drafted stubs that conform to the strict profile (`type: concept`, `resource:`, `# Citations`, `timestamp`, no `topic:`/`sources:`); all interpolated frontmatter scalars are YAML-quoted so titles with `:`/`"`/`#` stay parseable. `check` must remain green (ingest is outside validation scope).
 
 - [ ] **Step 1: Copy the ingest pipeline and wrapper verbatim**
 
@@ -951,18 +959,47 @@ mkdir -p scripts
 cp ~/personal/education/education-wiki/scripts/ingest.mjs scripts/ingest.mjs
 ```
 
-- [ ] **Step 2: Patch `ingest/ingest/draft.py` to the strict profile**
+- [ ] **Step 2: Add a YAML-safe scalar serializer**
 
+Create `ingest/ingest/yamlsafe.py`:
+```python
+"""Serialize a string as a safe double-quoted YAML scalar."""
+
+
+def yaml_str(value: str) -> str:
+    escaped = str(value).replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{escaped}"'
+```
+
+- [ ] **Step 3: Patch `ingest/ingest/rawstore.py` to quote interpolated scalars**
+
+Add the import near the top of `rawstore.py`:
+```python
+from .yamlsafe import yaml_str
+```
+Then in `write_raw`, change the `title` and `original_filename` frontmatter lines so they read:
+```python
+        f"title: {yaml_str(slug)}\n"
+        f"original_filename: {yaml_str(original_filename)}\n"
+```
+(Leave `type`, `engine`, `engine_version`, `content_hash` as-is — they are controlled, safe values.)
+
+- [ ] **Step 4: Patch `ingest/ingest/draft.py` to the strict profile**
+
+Add the import near the top of `draft.py`:
+```python
+from .yamlsafe import yaml_str
+```
 Replace the `build_stub` function (the `extract_headings` function and the two `BANNER`/`NO_OUTLINE` constants stay unchanged) with:
 ```python
 def build_stub(*, title: str, raw_path: str, headings: list[str], timestamp: str) -> str:
     front = (
         "---\n"
         "type: concept\n"
-        f"title: {title}\n"
+        f"title: {yaml_str(title)}\n"
         "status: stub\n"
         f"timestamp: {timestamp}\n"
-        f"resource: {raw_path}\n"
+        f"resource: {yaml_str(raw_path)}\n"
         "---\n"
     )
     outline = (BANNER + "\n\n" + "\n\n".join(headings) + "\n") if headings else (NO_OUTLINE + "\n")
@@ -970,7 +1007,7 @@ def build_stub(*, title: str, raw_path: str, headings: list[str], timestamp: str
     return front + "\n" + outline + citations
 ```
 
-- [ ] **Step 3: Update `ingest/ingest/cli.py` to pass `timestamp` and drop `topic`**
+- [ ] **Step 5: Update `ingest/ingest/cli.py` to pass `timestamp` and drop `topic`**
 
 At the top of `cli.py`, add to the imports:
 ```python
@@ -986,7 +1023,22 @@ Then replace the stub-drafting call (currently `stub = build_stub(title=title, t
     )
 ```
 
-- [ ] **Step 4: Update `ingest/tests/test_draft.py` for the strict profile**
+- [ ] **Step 6: Add `ingest/tests/test_yamlsafe.py`**
+
+```python
+from ingest.yamlsafe import yaml_str
+
+
+def test_yaml_str_quotes_plain_values():
+    assert yaml_str("deck") == '"deck"'
+
+
+def test_yaml_str_quotes_and_escapes_special_chars():
+    assert yaml_str("Foo: Bar #1") == '"Foo: Bar #1"'
+    assert yaml_str('a "q"') == '"a \\"q\\""'
+```
+
+- [ ] **Step 7: Update `ingest/tests/test_draft.py` for the strict profile**
 
 Replace the two `build_stub` tests (the `extract_headings` tests stay) with:
 ```python
@@ -995,7 +1047,7 @@ def test_build_stub_with_headings_is_strict_profile():
                      headings=["# Deck", "## Intro"], timestamp="2026-06-27T00:00:00Z")
     assert "type: concept" in out
     assert "status: stub" in out
-    assert "resource: raw/system-design/deck.md" in out
+    assert 'resource: "raw/system-design/deck.md"' in out   # YAML-quoted
     assert "timestamp: 2026-06-27T00:00:00Z" in out
     assert "topic:" not in out          # dialect field dropped
     assert "sources:" not in out        # dialect field dropped
@@ -1003,6 +1055,12 @@ def test_build_stub_with_headings_is_strict_profile():
     assert "`raw/system-design/deck.md`" in out
     assert "auto-extracted from source — not yet distilled" in out
     assert "# Deck" in out and "## Intro" in out
+
+
+def test_build_stub_quotes_titles_with_special_characters():
+    out = build_stub(title="Foo: Bar #1", raw_path="raw/t/x.md",
+                     headings=[], timestamp="2026-06-27T00:00:00Z")
+    assert 'title: "Foo: Bar #1"' in out
 
 
 def test_build_stub_without_headings_emits_no_outline_banner_and_no_invented_headings():
@@ -1015,7 +1073,7 @@ def test_build_stub_without_headings_emits_no_outline_banner_and_no_invented_hea
     assert headings == ["# Citations"]
 ```
 
-- [ ] **Step 5: Add the `ingest` script to `package.json`**
+- [ ] **Step 8: Add the `ingest` script to `package.json`**
 
 In `package.json`, change the `scripts` block so it reads:
 ```json
@@ -1027,20 +1085,18 @@ In `package.json`, change the `scripts` block so it reads:
   },
 ```
 
-- [ ] **Step 6: Verify `check` still passes (ingest is out of scope)**
+- [ ] **Step 9: Verify `check` still passes and the ingest pipeline is sound**
 
 Run: `npm run check`
 Expected: `check ok: 2 concepts, 0 problems` — `ingest/` is not validated.
-
-- [ ] **Step 7: Verify the ingest wrapper and Python tests**
 
 Run: `npm run ingest` (no args)
 Expected: argparse usage error (exit 2) or a clear `error: uv not found ...` message — NOT a stack trace.
 
 If `uv` is installed, run: `cd ingest && uv run --extra dev pytest -q`
-Expected: all tests pass (including the updated `test_draft.py`). If `uv` is not installed, skip this and note it.
+Expected: all tests pass (including `test_yamlsafe.py` and the updated `test_draft.py`). If `uv` is not installed, skip this and note it.
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 10: Commit**
 
 ```bash
 git add ingest scripts/ingest.mjs package.json
@@ -1104,6 +1160,8 @@ Expected: public repo at `github.com/het-sheth/okf-wiki-template`; after merge +
 - `log.md` reserved; no `type: log` convention → Task 2 `isReserved`, Task 3 `validate()`. ✓
 - Link handling robust to code blocks / parens / images → Task 3 marked-token `localMdLinksIn` + `renderer.link`; Task 4 unit tests. ✓
 - "valid HTML" = exits 0 + DOCTYPE/head/body + links resolve → Task 4 "build emits valid HTML…" test. ✓
+- HTML attribute safety (href/title with `"`) → Task 2 `escAttr` + test, used in Task 3 `renderer.link`. ✓
+- Parseable frontmatter for ingest stubs (titles with `:`/`"`/`#`) → Task 6 `yamlsafe.yaml_str`, applied in `draft.py`/`rawstore.py`, tested in Task 6 Steps 6–7. ✓
 - AGENTS canonical + CLAUDE shim → Task 5. ✓
 - Optional ingest, patched to strict profile, exact removal → Task 6 + README. ✓
 - No-invent rule verbatim → Task 5 AGENTS.md; preserved in ingest no-outline test (Task 6 Step 4). ✓
