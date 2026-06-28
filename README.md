@@ -23,6 +23,11 @@ adds extra rules (typed concepts, resolved links, reserved-file discipline) to k
 - `npm run check` — validate the OKF profile; non-zero exit on any violation.
 - `npm test` — `node --test` (helper unit tests + end-to-end conformance).
 
+> [!NOTE]
+> `npm audit` reports 2 moderate transitive advisories from the pinned `gray-matter` (via `js-yaml`).
+> These are accepted because the build only ever runs over trusted local Markdown you author. If you
+> feed this pipeline untrusted Markdown, be aware of those advisories.
+
 ## Layout
 - `wiki/<topic>/<slug>.md` — concept pages (canonical).
 - `wiki/<topic>/index.md` — optional, no-frontmatter intro prose (listing is auto-generated).

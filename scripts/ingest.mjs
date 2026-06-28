@@ -4,7 +4,7 @@ import { spawnSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const ROOT = dirname(fileURLToPath(import.meta.url));            // education-wiki/scripts
+const ROOT = dirname(fileURLToPath(import.meta.url));            // okf-wiki-template/scripts
 const INGEST_DIR = join(ROOT, '..', 'ingest');
 
 // preflight: uv must exist
