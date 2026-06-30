@@ -7,9 +7,11 @@ import { fileURLToPath } from 'node:url';
 import { argv } from 'node:process';
 import matter from 'gray-matter';
 import { marked } from 'marked';
+import { env } from 'node:process';
 import {
   esc, escAttr, summary, isReserved, typeViolation,
   isLocalMd, resolveLinkTarget, siteRelFromRepoRel,
+  scanWikilinks, extractCrossLinks, withinWikiSiteRel,
 } from './lib/okf.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
@@ -21,6 +23,49 @@ const CHECK = argv.includes('--check');
 const TOPICS = JSON.parse(readFileSync(join(ROOT, 'topics.json'), 'utf8'));
 const PKG = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'));
 const WIKI_NAME = PKG.name;
+const WIKI_TITLE = (PKG.okf && PKG.okf.title) || WIKI_NAME;
+
+// --- federation (cross-wiki) config -----------------------------------------
+// Opt-in, DEFAULT OFF (R3): a wiki only resolves cross-wiki links to real hrefs when its own
+// package.json sets `okf.federation: true`. With it off, cross-wiki links are still parsed and
+// masked — the raw token and peer/topic/slug names never reach the generated HTML.
+const FEDERATION = !!(PKG.okf && PKG.okf.federation);
+// peers.json discovery: OKF_PEERS env var wins, else the default sibling hub path.
+const PEERS_PATH = env.OKF_PEERS || join(ROOT, '..', 'knowledge-hub', 'peers.json');
+
+// peer name -> { manifest, siteRoot } for every federated peer whose manifest is present.
+// Empty when federation is off or peers.json / manifests are missing — callers degrade gracefully.
+function loadPeers() {
+  const peers = new Map();
+  if (!FEDERATION || !existsSync(PEERS_PATH)) return peers;
+  let registry;
+  try { registry = JSON.parse(readFileSync(PEERS_PATH, 'utf8')); }
+  catch { return peers; }
+  const peersDir = dirname(PEERS_PATH);
+  for (const entry of registry.peers || []) {
+    if (!entry || !entry.name || !entry.path) continue;
+    if (entry.name === WIKI_NAME) continue; // never federate against self
+    const manifestPath = resolve(peersDir, entry.path, 'site', 'manifest.json');
+    if (!existsSync(manifestPath)) continue; // missing peer manifest -> link stays unresolved
+    let manifest;
+    try { manifest = JSON.parse(readFileSync(manifestPath, 'utf8')); }
+    catch { continue; }
+    peers.set(entry.name, { manifest, siteRoot: dirname(manifestPath) });
+  }
+  return peers;
+}
+const PEERS = loadPeers();
+
+// Resolve a cross-wiki link to an href into the target peer's local site/, relative to the
+// page being rendered (outDir). Returns null when the peer or its page id is not resolvable.
+function resolveCrossHref(peer, id, outDir) {
+  const p = PEERS.get(peer);
+  if (!p) return null;
+  const page = (p.manifest.pages || []).find((pg) => pg.id === id);
+  if (!page) return null;
+  const targetAbs = join(p.siteRoot, page.href);
+  return toPosix(relative(outDir, targetAbs)) || basename(targetAbs);
+}
 
 const ALERTS = { TIP: 'tip', NOTE: 'note', WARNING: 'warn', CAUTION: 'gotcha', IMPORTANT: 'note' };
 const toPosix = (p) => p.split(/[\\/]/).join('/');
@@ -78,6 +123,31 @@ renderer.link = function ({ href, title, tokens }) {
 };
 marked.use({ renderer });
 
+// Replace every `[[...]]` wikilink with an <a> (or masked text) BEFORE marked runs — mirrors
+// education-wiki's preprocess approach. `outDir` is the rendered page's site dir; `topic` is the
+// page's topic (for resolving bare [[slug]]). Cross-wiki links are ALWAYS masked when federation
+// is off: only the human label (or a neutral placeholder) is emitted — never the peer/topic/slug.
+function preprocessWikilinks(md, { topic, outDir }) {
+  return String(md).replace(/\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g, (raw, target, label) => {
+    const [w] = scanWikilinks(raw);
+    const text = w.label || (w.kind === 'cross' ? '' : w.target.split('/').pop());
+    if (w.kind === 'within') {
+      const siteAbs = join(SITE_DIR, withinWikiSiteRel(w.target, topic));
+      const href = toPosix(relative(outDir, siteAbs)) || basename(siteAbs);
+      return `<a href="${escAttr(href)}">${esc(text)}</a>`;
+    }
+    if (w.kind === 'cross') {
+      const href = resolveCrossHref(w.peer, w.id, outDir);
+      if (href) return `<a href="${escAttr(href)}">${esc(w.label || w.id.split('/').pop())}</a>`;
+      // federation off, or peer/page unresolved: mask. Never leak peer/topic/slug.
+      return w.label ? esc(w.label) : '<span class="xref-missing">(linked page)</span>';
+    }
+    // malformed: check() rejects it; in a build, mask to a neutral placeholder rather than
+    // leaking the raw token into HTML.
+    return w.label ? esc(w.label) : '<span class="xref-missing">(linked page)</span>';
+  });
+}
+
 function preprocessAlerts(md) {
   const lines = md.split('\n');
   const out = [];
@@ -98,7 +168,8 @@ function preprocessAlerts(md) {
 
 function renderMarkdown(md, fromDir, outDir) {
   LINKCTX = { fromDir, outDir };
-  return marked.parse(preprocessAlerts(md));
+  const topic = fromDir.startsWith('wiki/') ? fromDir.slice('wiki/'.length).split('/')[0] : '';
+  return marked.parse(preprocessAlerts(preprocessWikilinks(md, { topic, outDir })));
 }
 
 // --- collect ----------------------------------------------------------------
@@ -156,6 +227,27 @@ function validate({ concepts, reserved, rawDocs }) {
       const repoTarget = resolveLinkTarget(fromDir, href);
       if (repoTarget === null || !conceptPaths.has(repoTarget)) {
         problems.push(`${c.key} -> broken link ${href} (must point to an existing wiki concept)`);
+      }
+    }
+  }
+
+  // wikilinks: within-wiki must resolve to an existing concept; malformed forms always fail;
+  // cross-wiki links are only resolved/checked when federation is on AND the peer manifest is
+  // present (off => masked, not checked, so the wiki still builds standalone).
+  const conceptIds = new Set(concepts.map((c) => c.key)); // "topic/slug"
+  for (const c of concepts) {
+    for (const w of scanWikilinks(c.content)) {
+      if (w.kind === 'malformed') {
+        problems.push(`${c.key} -> malformed wikilink [[${w.target}]] (${w.reason})`);
+      } else if (w.kind === 'within') {
+        const id = w.target.includes('/') ? w.target : `${c.topic}/${w.target}`;
+        if (!conceptIds.has(id)) problems.push(`${c.key} -> [[${w.target}]] (no such page)`);
+      } else if (w.kind === 'cross' && FEDERATION) {
+        const peer = PEERS.get(w.peer);
+        if (!peer) continue; // peer not federated / manifest absent -> not checkable, stays masked
+        if (!(peer.manifest.pages || []).some((pg) => pg.id === w.id)) {
+          problems.push(`${c.key} -> cross-wiki link [[${w.peer}:${w.id}]] (no such page in peer "${w.peer}")`);
+        }
       }
     }
   }
@@ -252,6 +344,26 @@ ${sections}`;
   return writes;
 }
 
+// --- manifest ---------------------------------------------------------------
+// site/manifest.json — the deterministic, no-LLM federation descriptor the hub reads.
+// `id` is the stable cross-wiki identifier (topic/slug); `links` is the page's outgoing
+// cross-wiki references, which the hub turns into "referenced by" backlinks.
+export function buildManifest(concepts) {
+  const pages = concepts
+    .map((c) => ({
+      id: c.key,
+      title: c.data.title || c.slug,
+      topic: c.topic,
+      type: c.data.type || null,
+      description: summary(c.data) || '',
+      tags: c.data.tags || [],
+      href: siteRelFromRepoRel(c.repoRel),
+      links: extractCrossLinks(c.content),
+    }))
+    .sort((a, b) => a.id.localeCompare(b.id)); // deterministic ordering
+  return { wiki: WIKI_NAME, title: WIKI_TITLE, pages };
+}
+
 // --- main -------------------------------------------------------------------
 
 function main() {
@@ -270,7 +382,9 @@ function main() {
   mkdirSync(join(SITE_DIR, 'assets'), { recursive: true });
   cpSync(join(ASSETS_SRC, 'wiki.css'), join(SITE_DIR, 'assets', 'wiki.css'));
   for (const [file, html] of writes) { mkdirSync(dirname(file), { recursive: true }); writeFileSync(file, html); }
-  console.log(`built ${collected.concepts.length} concepts -> site/`);
+  const manifest = buildManifest(collected.concepts);
+  writeFileSync(join(SITE_DIR, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
+  console.log(`built ${collected.concepts.length} concepts -> site/ (+ manifest.json)`);
 }
 
 // Run only when invoked directly (so tests can import helpers without side effects).
