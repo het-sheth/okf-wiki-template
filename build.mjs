@@ -203,8 +203,11 @@ function validate({ concepts, reserved, rawDocs }) {
   const problems = [];
   const conceptPaths = new Set(concepts.map((c) => c.repoRel)); // linkable targets
 
-  // reserved files (index.md / log.md, in wiki/ or raw/) must have no frontmatter
+  // reserved files (index.md / log.md, in wiki/ or raw/) must have no frontmatter.
+  // Directory-reserved files (_templates/ scaffolding, journal/ inbox) are exempt — templates
+  // legitimately carry example frontmatter, and journal notes are freeform.
   for (const r of [...reserved, ...rawDocs.filter((d) => d.reserved)]) {
+    if (isReservedPath(r.repoRel)) continue;
     if (hasFrontmatter(r.raw)) problems.push(`${r.repoRel} -> reserved file (${r.base}) must have no frontmatter`);
   }
   // concept type rules
