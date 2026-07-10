@@ -27,6 +27,10 @@ status: stub | learning | researched | solid   # optional custom lifecycle key
 ## Reserved files (OKF)
 - `index.md` and `log.md` carry **NO frontmatter**. `index.md` = intro prose (listing is generated).
   `log.md` = chronological update history. Both are exempt from the `type` requirement.
+- **Reserved directories:** `wiki/_templates/` (note scaffolding) and `wiki/journal/` (the dated
+  private inbox) are reserved like `index.md`/`log.md` — their files carry **no frontmatter**, are
+  exempt from the `type` requirement and from link/wikilink resolution, and are not published to
+  `site/`. Journal notes are the capture inbox; durable knowledge is promoted into topic concepts.
 
 ## Body conventions the generator understands
 - Cross-link **concepts** with **standard Markdown links**: `[Label](/wiki/<topic>/<slug>.md)`

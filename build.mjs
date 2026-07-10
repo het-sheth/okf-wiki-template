@@ -9,7 +9,7 @@ import matter from 'gray-matter';
 import { marked } from 'marked';
 import { env } from 'node:process';
 import {
-  esc, escAttr, summary, isReserved, typeViolation,
+  esc, escAttr, summary, isReserved, isReservedPath, typeViolation,
   isLocalMd, resolveLinkTarget, siteRelFromRepoRel,
   scanWikilinks, extractCrossLinks, withinWikiSiteRel,
 } from './lib/okf.mjs';
@@ -180,7 +180,8 @@ function collect() {
   for (const file of walk(WIKI_DIR)) {
     const base = basename(file);
     const raw = readFileSync(file, 'utf8');
-    if (isReserved(base)) { reserved.push({ file, repoRel: rootRel(file), base, raw }); continue; }
+    const repoRel = rootRel(file);
+    if (isReserved(base) || isReservedPath(repoRel)) { reserved.push({ file, repoRel, base, raw }); continue; }
     const { data, content } = matter(raw);
     const topic = toPosix(relative(WIKI_DIR, file)).split('/')[0];
     concepts.push({ file, repoRel: rootRel(file), topic, slug: basename(file, '.md'),

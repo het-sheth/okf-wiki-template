@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  esc, escAttr, summary, isReserved, typeViolation,
+  esc, escAttr, summary, isReserved, isReservedPath, typeViolation,
   isLocalMd, resolveLinkTarget, siteRelFromRepoRel,
   parseWikilink, scanWikilinks, extractWikilinks, extractCrossLinks, withinWikiSiteRel,
 } from '../lib/okf.mjs';
@@ -23,6 +23,14 @@ test('isReserved matches OKF reserved filenames only', () => {
   assert.equal(isReserved('index.md'), true);
   assert.equal(isReserved('log.md'), true);
   assert.equal(isReserved('welcome.md'), false);
+});
+
+test('isReservedPath exempts _templates and journal directories', () => {
+  assert.equal(isReservedPath('wiki/_templates/daily.md'), true);
+  assert.equal(isReservedPath('wiki/journal/2026-07-02.md'), true);
+  assert.equal(isReservedPath('wiki/tools/okta.md'), false);
+  assert.equal(isReservedPath('wiki/getting-started/index.md'), false);
+  assert.equal(isReservedPath('raw/meetings/x.md'), false);
 });
 
 test('typeViolation enforces area -> type for concepts', () => {
