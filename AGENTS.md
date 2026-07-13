@@ -77,5 +77,6 @@ the local knowledge hub: `wiki`, `title`, and `pages[]` each with `id` (=`topic/
 page's outgoing `[[<peer>:<topic>/<slug>]]` references — what lets the hub build backlinks).
 
 ## Operations
-- **Build:** `npm run build`. **Lint:** `npm run check`. **Test:** `npm test`.
+- **Check (always run):** `npm run check` — validates the OKF profile; the everyday gate. **Test:** `npm test`.
+- **Build (optional):** `npm run build` — regenerates `site/`; only for publishing/federation, not the everyday write → check loop.
 - **Optional ingest** (if `ingest/` is present): `npm run ingest -- <src> --topic <t>`. See README.
