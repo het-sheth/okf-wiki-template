@@ -10,7 +10,18 @@ ingest turns PDFs/docs into source pages.
 2. Rename in three places: `name` in `package.json`, the topic list in `topics.json`, and the title
    of this README.
 3. `npm install`
-4. Write pages under `wiki/<topic>/`, then `npm run check` and `npm run build`.
+4. Write pages under `wiki/<topic>/`, then `npm run check` to validate.
+
+## Reading & editing
+The wiki is Markdown-canonical, so the everyday loop is just **write → `npm run check`**: edit pages
+in any text editor, or open `wiki/` as an [Obsidian](https://obsidian.md) vault, and run `npm run
+check` to validate the OKF profile. The static site (`site/`) is generated and exists only if you
+want to publish or federate — see below. It's not part of the routine loop.
+
+## Optional: publishing & federation
+`npm run build` regenerates `site/` (static HTML) and writes `site/manifest.json` for a local
+knowledge hub. Run it only when you want to publish the wiki or federate it with peer wikis; it's
+not needed to author, validate, or read the wiki day to day.
 
 ## What's an OKF profile?
 OKF (Google Cloud, v0.1) is a vendor-neutral Markdown standard for giving AI agents curated context.
@@ -19,9 +30,9 @@ adds extra rules (typed concepts, resolved links, reserved-file discipline) to k
 `AGENTS.md` for the full schema and conventions.
 
 ## Commands
-- `npm run build` — regenerate `site/` (do not hand-edit `site/`).
-- `npm run check` — validate the OKF profile; non-zero exit on any violation.
+- `npm run check` — validate the OKF profile; non-zero exit on any violation. The everyday gate.
 - `npm test` — `node --test` (helper unit tests + end-to-end conformance).
+- `npm run build` — regenerate `site/` (optional; publishing/federation only — do not hand-edit `site/`).
 
 > [!NOTE]
 > `npm audit` reports 2 moderate transitive advisories from the pinned `gray-matter` (via `js-yaml`).
