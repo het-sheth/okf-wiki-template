@@ -115,6 +115,21 @@ test('build emits valid HTML with a rewritten, resolving link', () => {
   assert.ok(resolves, 'rewritten link target must exist');
 });
 
+test('check exempts _templates/ and journal/ dirs (frontmatter + dangling wikilinks allowed)', () => {
+  const dir = sandbox();
+  mkdirSync(join(dir, 'wiki/_templates'), { recursive: true });
+  // a template legitimately carries example frontmatter and a placeholder wikilink
+  writeFileSync(join(dir, 'wiki/_templates/concept.md'),
+    '---\ntype: concept\ntitle: "{{title}}"\n---\n\nSee [[does-not-exist-yet]].\n');
+  mkdirSync(join(dir, 'wiki/journal'), { recursive: true });
+  // a journal note is frontmatter-free and may link to not-yet-written pages
+  writeFileSync(join(dir, 'wiki/journal/2026-01-01.md'), '# 2026-01-01\n\n- [[also-dangling]]\n');
+  const r = run(dir, '--check');
+  clean(dir);
+  assert.equal(r.status, 0, `expected pass; stdout=${r.stdout} stderr=${r.stderr}`);
+  assert.match(r.stdout, /check ok/);
+});
+
 // --- e2e: profile negatives -------------------------------------------------
 
 function expectCheckFails(mutate, rx) {

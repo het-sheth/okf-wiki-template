@@ -9,7 +9,7 @@ import matter from 'gray-matter';
 import { marked } from 'marked';
 import { env } from 'node:process';
 import {
-  esc, escAttr, summary, isReserved, typeViolation,
+  esc, escAttr, summary, isReserved, isReservedPath, typeViolation,
   isLocalMd, resolveLinkTarget, siteRelFromRepoRel,
   scanWikilinks, extractCrossLinks, withinWikiSiteRel,
 } from './lib/okf.mjs';
@@ -180,10 +180,11 @@ function collect() {
   for (const file of walk(WIKI_DIR)) {
     const base = basename(file);
     const raw = readFileSync(file, 'utf8');
-    if (isReserved(base)) { reserved.push({ file, repoRel: rootRel(file), base, raw }); continue; }
+    const repoRel = rootRel(file);
+    if (isReserved(base) || isReservedPath(repoRel)) { reserved.push({ file, repoRel, base, raw }); continue; }
     const { data, content } = matter(raw);
     const topic = toPosix(relative(WIKI_DIR, file)).split('/')[0];
-    concepts.push({ file, repoRel: rootRel(file), topic, slug: basename(file, '.md'),
+    concepts.push({ file, repoRel, topic, slug: basename(file, '.md'),
       key: `${topic}/${basename(file, '.md')}`, data, content });
   }
   const rawDocs = walk(RAW_DIR).map((file) => {
@@ -202,8 +203,11 @@ function validate({ concepts, reserved, rawDocs }) {
   const problems = [];
   const conceptPaths = new Set(concepts.map((c) => c.repoRel)); // linkable targets
 
-  // reserved files (index.md / log.md, in wiki/ or raw/) must have no frontmatter
+  // reserved files (index.md / log.md, in wiki/ or raw/) must have no frontmatter.
+  // Directory-reserved files (_templates/ scaffolding, journal/ inbox) are exempt — templates
+  // legitimately carry example frontmatter, and journal notes are freeform.
   for (const r of [...reserved, ...rawDocs.filter((d) => d.reserved)]) {
+    if (isReservedPath(r.repoRel)) continue;
     if (hasFrontmatter(r.raw)) problems.push(`${r.repoRel} -> reserved file (${r.base}) must have no frontmatter`);
   }
   // concept type rules
