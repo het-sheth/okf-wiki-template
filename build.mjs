@@ -184,7 +184,7 @@ function collect() {
     if (isReserved(base) || isReservedPath(repoRel)) { reserved.push({ file, repoRel, base, raw }); continue; }
     const { data, content } = matter(raw);
     const topic = toPosix(relative(WIKI_DIR, file)).split('/')[0];
-    concepts.push({ file, repoRel: rootRel(file), topic, slug: basename(file, '.md'),
+    concepts.push({ file, repoRel, topic, slug: basename(file, '.md'),
       key: `${topic}/${basename(file, '.md')}`, data, content });
   }
   const rawDocs = walk(RAW_DIR).map((file) => {
