@@ -43,7 +43,8 @@
 - Source: `okf-wiki-template/lib/okf.mjs` (the `v0.2 profile validators` section)
 
 **Interfaces:**
-- Produces: `prohibitedKeyViolations(data)`, `citationsHeadingViolation(content)`, `isoViolations(data)`, `sourceViolations(data, content)`, `supersededByViolations(key, data, conceptIds)`. Identical signatures and message text to the template's, so the two implementations of one profile stay readable side by side.
+- Produces: `prohibitedKeyViolations(data)`, `citationsHeadingViolation(content)`, `isoViolations(data)`, `sourceViolations(data, content)`, `supersessionViolations(pages)`. Identical signatures and message text to the template's, so the two implementations of one profile stay readable side by side.
+- `supersessionViolations` takes the whole graph as `[{ key, supersededBy }]`, not one page. A cycle is not visible from a single edge, so a per-page signature cannot detect `a -> b -> a`.
 
 - [ ] **Step 1: Branch**
 
@@ -98,7 +99,21 @@ test('check fails on a dangling superseded_by even when the vocabulary lacks dep
   // set okf.statusValues to ['wip','done'], point superseded_by at a missing page,
   // expect exit 1 and /no such page/
 });
+
+test('check fails on a two-page superseded_by cycle', () => {
+  // page a has superseded_by: t/b, page b has superseded_by: t/a, both exist,
+  // expect exit 1 and /cycle/
+});
+
+test('check fails on a three-page superseded_by cycle', () => {
+  // a -> b -> c -> a, all three exist, expect exit 1 and /cycle/
+});
 ```
+
+The two cycle tests are the reason this task exists in this form. `example-second-brain` currently
+has archival-gated validation with access to a full supersession map; Task 2 deletes it. Without
+these tests, that deletion would silently drop cycle detection, which the design requires
+unconditionally.
 
 Fill each body using the file's existing bundle helper. Do not leave them as comments; the comment lines above describe exactly what each body must construct.
 
@@ -119,12 +134,14 @@ In `check.mjs`, add the five names to the `./lib/okf.mjs` import. After the exis
     if (heading) problems.push(`${c.key} -> ${heading}`);
     for (const m of isoViolations(c.data)) problems.push(`${c.key} -> ${m}`);
     for (const m of sourceViolations(c.data, c.content)) problems.push(`${c.key} -> ${m}`);
-    for (const m of supersededByViolations(c.key, c.data, conceptIds)) problems.push(`${c.key} -> ${m}`);
   }
+  problems.push(
+    ...supersessionViolations(concepts.map((c) => ({ key: c.key, supersededBy: c.data.superseded_by })))
+  );
 ```
 
-If `conceptIds` is not already in scope at that point, declare it above the loop as
-`const conceptIds = new Set(concepts.map((c) => c.key));` and delete any later duplicate declaration.
+`supersessionViolations` already prefixes each message with the offending page key, so it is
+pushed as a whole rather than per concept.
 
 - [ ] **Step 9: Run the full suite**
 
@@ -188,7 +205,15 @@ In `lib/config.mjs`:
 export const DEFAULT_CONCEPT_TYPES = ['concept', 'pattern', 'worked-example'];
 ```
 2. In `resolveOkfConfig`, resolve `conceptTypes` with the same non-empty-string-array validation the other array keys use, defaulting to `DEFAULT_CONCEPT_TYPES`.
-3. Replace the `archivalEnabled` derivation (currently lines 49 to 51) with an explicit boolean:
+3. Replace the `archivalEnabled` derivation with an explicit boolean. Find it by its exact current text rather than by line number, since step 2 above inserts code higher in the same file:
+
+```javascript
+  // Archival (`superseded_by` + `status: deprecated`) only makes sense when the vocabulary
+  // actually has a `deprecated` state; without one the checks are skipped entirely.
+  const archivalEnabled = statusValues.includes('deprecated');
+```
+
+Replace it with:
 ```javascript
   // Explicit, never inferred from whether the vocabulary happens to contain 'deprecated'.
   // `superseded_by` is validated whenever present regardless of this flag: lifecycle policy
@@ -202,7 +227,7 @@ export const DEFAULT_CONCEPT_TYPES = ['concept', 'pattern', 'worked-example'];
 
 Run: `grep -rn "archivalEnabled" check.mjs lib scripts test`
 
-For each hit, replace with `archival`. Any check that was gated on `archivalEnabled` purely to validate `superseded_by` should be deleted outright, since Task 1's unconditional validation now covers it. Keep gating only for checks that genuinely depend on a `deprecated` state existing.
+For each hit, replace with `archival`. A check gated on `archivalEnabled` purely to validate `superseded_by` is deleted, since Task 1's unconditional validation now covers it, **including cycles**. Before deleting any such block, confirm the cycle tests from Task 1 Step 6 are present and passing; the existing gated code has the full supersession map, so deleting it without those tests silently loses cycle detection. Keep gating only for checks that genuinely depend on a `deprecated` state existing.
 
 - [ ] **Step 5: Thread conceptTypes through typeViolation**
 
@@ -364,6 +389,8 @@ has not merged, or as a follow-up commit there.
 
 **Placeholder check.** Task 1 Step 6 and Task 2 Steps 3 through 5 describe transformations rather than pasting final code, because the target files' surrounding style must be read first and both are near-mechanical repeats of blocks written verbatim in the template plan. Each names the exact source block to copy and the exact assertion or message text required, so nothing is left to invention.
 
-**Type consistency.** The five validator signatures match the template's exactly. `resolveOkfConfig` returns `archival`, never `archivalEnabled`, in both repositories after this plan. `typeViolation` takes the same optional `conceptTypes` parameter in both.
+**Type consistency.** The five validator signatures match the template's exactly, including `supersessionViolations(pages)` taking `[{ key, supersededBy }]` rather than a single page. `resolveOkfConfig` returns `archival`, never `archivalEnabled`, in both repositories after this plan. `typeViolation` takes the same optional `conceptTypes` parameter in both.
+
+**Divergence accepted.** The template also gains `okf.needsWorkStatus`, which controls its muted card class. `example-second-brain` renders nothing (Obsidian is its UI, it has no `build.mjs`), so that key has no meaning there and is deliberately not backported. The two resolvers therefore differ by one key, which `lib/config.mjs` in each repository should note in a comment so the gap reads as intentional.
 
 **Ordering.** Task 1 must precede Task 2, because Task 2 Step 4 deletes `superseded_by` gating that only becomes redundant once Task 1's unconditional validation exists.
