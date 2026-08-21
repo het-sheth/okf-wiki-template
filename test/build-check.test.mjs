@@ -50,9 +50,12 @@ test('buildManifest emits the federation shape with outgoing cross-wiki links', 
 
 // --- e2e helpers ------------------------------------------------------------
 
-function sandbox() {
+const FIXTURES = join(ROOT, 'test/fixtures');
+
+function sandbox(fixture = 'minimal') {
   const dir = mkdtempSync(join(tmpdir(), 'okf-'));
-  for (const p of ['build.mjs', 'lib', 'wiki', 'raw', 'assets', 'topics.json', 'package.json']) {
+  cpSync(join(FIXTURES, fixture), dir, { recursive: true });
+  for (const p of ['build.mjs', 'lib', 'assets']) {
     cpSync(join(ROOT, p), join(dir, p), { recursive: true });
   }
   symlinkSync(join(ROOT, 'node_modules'), join(dir, 'node_modules'), 'dir');
@@ -103,15 +106,15 @@ test('build emits valid HTML with a rewritten, resolving link', () => {
   const dir = sandbox();
   const r = run(dir);
   assert.equal(r.status, 0, r.stderr);
-  const page = join(dir, 'site/getting-started/writing-concepts.html');
+  const page = join(dir, 'site/demo/alpha.html');
   const html = readFileSync(page, 'utf8');
   const ok = html.includes('<!DOCTYPE html>') && html.includes('<head>') && html.includes('<body>');
-  // the /wiki/.../welcome.md link must be rewritten to a relative .html that exists
-  const m = html.match(/href="([^"]*welcome\.html)"/);
+  // the ./beta.md link must be rewritten to a relative .html that exists
+  const m = html.match(/href="([^"]*beta\.html)"/);
   const resolves = m && existsSync(join(dirname(page), m[1]));
   clean(dir);
   assert.ok(ok, 'page must have DOCTYPE/head/body');
-  assert.ok(m, 'welcome link must be rewritten to .html');
+  assert.ok(m, 'beta link must be rewritten to .html');
   assert.ok(resolves, 'rewritten link target must exist');
 });
 
@@ -143,36 +146,36 @@ function expectCheckFails(mutate, rx) {
 
 test('check fails on a broken local link', () => {
   expectCheckFails((dir) => writeFileSync(
-    join(dir, 'wiki/getting-started/welcome.md'),
+    join(dir, 'wiki/demo/alpha.md'),
     '---\ntype: concept\ntitle: W\ndescription: d\n---\n\nSee [x](./does-not-exist.md).\n'
   ), /broken link/);
 });
 
 test('check fails when a reserved file has frontmatter', () => {
   expectCheckFails((dir) => writeFileSync(
-    join(dir, 'wiki/getting-started/index.md'),
+    join(dir, 'wiki/demo/index.md'),
     '---\ntype: topic\n---\n\n# Getting started\n'
   ), /must have no frontmatter/);
 });
 
 test('check fails on an invalid concept type', () => {
   expectCheckFails((dir) => writeFileSync(
-    join(dir, 'wiki/getting-started/welcome.md'),
+    join(dir, 'wiki/demo/alpha.md'),
     '---\ntype: banana\ntitle: W\ndescription: d\n---\n\nbody\n'
   ), /expected one of/);
 });
 
 test('check fails on a missing concept type', () => {
   expectCheckFails((dir) => writeFileSync(
-    join(dir, 'wiki/getting-started/welcome.md'),
+    join(dir, 'wiki/demo/alpha.md'),
     '---\ntitle: W\ndescription: d\n---\n\nbody\n'
   ), /missing required `type`/);
 });
 
 test('check fails on a raw file with the wrong type', () => {
   expectCheckFails((dir) => {
-    mkdirSync(join(dir, 'raw/getting-started'), { recursive: true });
-    writeFileSync(join(dir, 'raw/getting-started/note.md'), '---\ntype: concept\ntitle: n\n---\n\nsrc\n');
+    mkdirSync(join(dir, 'raw/demo'), { recursive: true });
+    writeFileSync(join(dir, 'raw/demo/note.md'), '---\ntype: concept\ntitle: n\n---\n\nsrc\n');
   }, /expected type "source"/);
 });
 
@@ -180,33 +183,33 @@ test('check fails on a raw file with the wrong type', () => {
 
 test('build renders a within-wiki [[topic/slug]] wikilink to a resolving .html', () => {
   const dir = sandbox();
-  writeConcept(dir, 'getting-started/welcome', 'See [[getting-started/writing-concepts]].');
+  writeConcept(dir, 'demo/alpha', 'See [[demo/beta]].');
   const r = run(dir);
-  const page = join(dir, 'site/getting-started/welcome.html');
+  const page = join(dir, 'site/demo/alpha.html');
   const html = readFileSync(page, 'utf8');
-  const m = html.match(/href="([^"]*writing-concepts\.html)"/);
+  const m = html.match(/href="([^"]*beta\.html)"/);
   const resolves = m && existsSync(join(dirname(page), m[1]));
   clean(dir);
   assert.equal(r.status, 0, r.stderr);
-  assert.ok(m, 'wikilink must render to a writing-concepts.html href');
+  assert.ok(m, 'wikilink must render to a beta.html href');
   assert.ok(resolves, 'rendered wikilink target must exist on disk');
   assert.ok(!html.includes('[['), 'no raw [[ token may survive into HTML');
 });
 
 test('build renders a bare [[slug]] against the current topic', () => {
   const dir = sandbox();
-  writeConcept(dir, 'getting-started/welcome', 'See [[writing-concepts|the rules]].');
+  writeConcept(dir, 'demo/alpha', 'See [[beta|the rules]].');
   const r = run(dir);
-  const html = readFileSync(join(dir, 'site/getting-started/welcome.html'), 'utf8');
+  const html = readFileSync(join(dir, 'site/demo/alpha.html'), 'utf8');
   clean(dir);
   assert.equal(r.status, 0, r.stderr);
-  assert.match(html, /href="writing-concepts\.html">the rules<\/a>/);
+  assert.match(html, /href="beta\.html">the rules<\/a>/);
 });
 
 test('check fails on a within-wiki wikilink to a non-existent page', () => {
   expectCheckFails(
-    (dir) => writeConcept(dir, 'getting-started/welcome', 'See [[getting-started/nope]].'),
-    /\[\[getting-started\/nope\]\] \(no such page\)/
+    (dir) => writeConcept(dir, 'demo/alpha', 'See [[demo/nope]].'),
+    /\[\[demo\/nope\]\] \(no such page\)/
   );
 });
 
@@ -214,17 +217,17 @@ test('check fails on a within-wiki wikilink to a non-existent page', () => {
 
 test('check fails on a malformed cross-wiki wikilink even with federation off', () => {
   expectCheckFails(
-    (dir) => writeConcept(dir, 'getting-started/welcome', 'See [[peer-wiki:bareslug]].'),
+    (dir) => writeConcept(dir, 'demo/alpha', 'See [[peer-wiki:bareslug]].'),
     /malformed wikilink/
   );
 });
 
 test('cross-wiki link is masked (no peer/topic/slug) when federation is OFF', () => {
   const dir = sandbox();
-  writeConcept(dir, 'getting-started/welcome',
+  writeConcept(dir, 'demo/alpha',
     'See [[education-wiki:agentic-engineering/overview|Agents overview]].');
   const r = run(dir);
-  const html = readFileSync(join(dir, 'site/getting-started/welcome.html'), 'utf8');
+  const html = readFileSync(join(dir, 'site/demo/alpha.html'), 'utf8');
   clean(dir);
   assert.equal(r.status, 0, r.stderr);
   assert.match(html, /Agents overview/, 'human label must render');
@@ -236,9 +239,9 @@ test('cross-wiki link is masked (no peer/topic/slug) when federation is OFF', ()
 
 test('cross-wiki link with no label masks to a neutral placeholder when OFF', () => {
   const dir = sandbox();
-  writeConcept(dir, 'getting-started/welcome', 'See [[education-wiki:agentic-engineering/overview]].');
+  writeConcept(dir, 'demo/alpha', 'See [[education-wiki:agentic-engineering/overview]].');
   const r = run(dir);
-  const html = readFileSync(join(dir, 'site/getting-started/welcome.html'), 'utf8');
+  const html = readFileSync(join(dir, 'site/demo/alpha.html'), 'utf8');
   clean(dir);
   assert.equal(r.status, 0, r.stderr);
   assert.match(html, /\(linked page\)/);
@@ -248,13 +251,13 @@ test('cross-wiki link with no label masks to a neutral placeholder when OFF', ()
 test('cross-wiki link resolves to a peer href when federation is ON', () => {
   const dir = sandbox();
   enableFederation(dir);
-  writeConcept(dir, 'getting-started/welcome',
+  writeConcept(dir, 'demo/alpha',
     'See [[education-wiki:agentic-engineering/overview|Agents overview]].');
   const peersPath = writePeer(dir, 'education-wiki',
     [{ id: 'agentic-engineering/overview', title: 'Overview',
        href: 'agentic-engineering/overview.html' }]);
   const r = runEnv(dir, { OKF_PEERS: peersPath });
-  const html = readFileSync(join(dir, 'site/getting-started/welcome.html'), 'utf8');
+  const html = readFileSync(join(dir, 'site/demo/alpha.html'), 'utf8');
   clean(dir);
   assert.equal(r.status, 0, r.stderr);
   // href points into the peer's site/ (relative path climbs out of this wiki)
@@ -264,7 +267,7 @@ test('cross-wiki link resolves to a peer href when federation is ON', () => {
 test('check fails on an unresolved cross-wiki link when federation is ON', () => {
   const dir = sandbox();
   enableFederation(dir);
-  writeConcept(dir, 'getting-started/welcome', 'See [[education-wiki:agentic-engineering/ghost]].');
+  writeConcept(dir, 'demo/alpha', 'See [[education-wiki:agentic-engineering/ghost]].');
   const peersPath = writePeer(dir, 'education-wiki',
     [{ id: 'agentic-engineering/overview', title: 'Overview', href: 'agentic-engineering/overview.html' }]);
   const r = runEnv(dir, { OKF_PEERS: peersPath }, '--check');
@@ -276,7 +279,7 @@ test('check fails on an unresolved cross-wiki link when federation is ON', () =>
 test('cross-wiki check is skipped (link masked, build succeeds) when federation is OFF', () => {
   const dir = sandbox();
   // points at a ghost page, but federation off => not resolved, not checked
-  writeConcept(dir, 'getting-started/welcome', 'See [[education-wiki:agentic-engineering/ghost|x]].');
+  writeConcept(dir, 'demo/alpha', 'See [[education-wiki:agentic-engineering/ghost|x]].');
   const r = run(dir, '--check');
   clean(dir);
   assert.equal(r.status, 0, `cross-wiki link must not fail check when off; stderr=${r.stderr}`);

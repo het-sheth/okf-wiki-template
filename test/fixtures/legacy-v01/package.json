@@ -1,0 +1,11 @@
+{
+  "name": "fixture-legacy",
+  "private": true,
+  "type": "module",
+  "okf": {
+    "statusValues": ["draft", "stable", "deprecated"],
+    "statusDefault": "stable",
+    "needsWorkStatus": "draft"
+  },
+  "dependencies": { "gray-matter": "4.0.3", "marked": "18.0.5" }
+}
