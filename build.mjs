@@ -13,6 +13,7 @@ import {
   isLocalMd, resolveLinkTarget, siteRelFromRepoRel,
   scanWikilinks, extractCrossLinks, withinWikiSiteRel,
 } from './lib/okf.mjs';
+import { resolveOkfConfig } from './lib/config.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const WIKI_DIR = join(ROOT, 'wiki');
@@ -22,14 +23,15 @@ const ASSETS_SRC = join(ROOT, 'assets');
 const CHECK = argv.includes('--check');
 const TOPICS = JSON.parse(readFileSync(join(ROOT, 'topics.json'), 'utf8'));
 const PKG = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'));
+const CFG = resolveOkfConfig(PKG.okf);
 const WIKI_NAME = PKG.name;
-const WIKI_TITLE = (PKG.okf && PKG.okf.title) || WIKI_NAME;
+const WIKI_TITLE = CFG.title || WIKI_NAME;
 
 // --- federation (cross-wiki) config -----------------------------------------
 // Opt-in, DEFAULT OFF (R3): a wiki only resolves cross-wiki links to real hrefs when its own
 // package.json sets `okf.federation: true`. With it off, cross-wiki links are still parsed and
 // masked — the raw token and peer/topic/slug names never reach the generated HTML.
-const FEDERATION = !!(PKG.okf && PKG.okf.federation);
+const FEDERATION = CFG.federation;
 // peers.json discovery: OKF_PEERS env var wins, else the default sibling hub path.
 const PEERS_PATH = env.OKF_PEERS || join(ROOT, '..', 'knowledge-hub', 'peers.json');
 
@@ -212,7 +214,7 @@ function validate({ concepts, reserved, rawDocs }) {
   }
   // concept type rules
   for (const c of concepts) {
-    const v = typeViolation({ area: 'wiki', type: c.data.type });
+    const v = typeViolation({ area: 'wiki', type: c.data.type, conceptTypes: CFG.conceptTypes });
     if (v) problems.push(`${c.key} -> ${v}`);
   }
   for (const d of rawDocs) {
@@ -307,8 +309,12 @@ function render({ concepts, reserved }) {
   const byTopic = (topic) => concepts.filter((c) => c.topic === topic)
     .sort((a, b) => (a.data.order ?? 99) - (b.data.order ?? 99)
       || String(a.data.title || a.slug).localeCompare(String(b.data.title || b.slug)));
+  // The muted card marks work in progress. The emitted class is a stable `needs-work` rather
+  // than the status word, so assets/wiki.css does not depend on the configured vocabulary.
+  const cardClass = (status) =>
+    CFG.needsWorkStatus && status === CFG.needsWorkStatus ? 'card needs-work' : 'card';
   const card = (hrefPrefix, c) =>
-    `<a class="card${c.data.status === 'stub' ? ' stub' : ''}" href="${hrefPrefix}${c.slug}.html"><div class="card-title">${esc(c.data.title || c.slug)}</div><div class="card-desc">${esc(summary(c.data))}</div></a>`;
+    `<a class="${cardClass(c.data.status)}" href="${hrefPrefix}${c.slug}.html"><div class="card-title">${esc(c.data.title || c.slug)}</div><div class="card-desc">${esc(summary(c.data))}</div></a>`;
 
   // concept pages
   for (const c of concepts) {

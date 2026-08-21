@@ -43,6 +43,18 @@ test('typeViolation enforces area -> type for concepts', () => {
   assert.match(typeViolation({ area: 'wiki', type: 'banana' }), /expected one of/);
 });
 
+test('typeViolation accepts a custom concept vocabulary', () => {
+  assert.equal(typeViolation({ area: 'wiki', type: 'lesson', conceptTypes: ['lesson'] }), null);
+  assert.match(
+    typeViolation({ area: 'wiki', type: 'concept', conceptTypes: ['lesson'] }),
+    /expected one of lesson/
+  );
+});
+
+test('typeViolation without a vocabulary keeps the built-in default', () => {
+  assert.equal(typeViolation({ area: 'wiki', type: 'concept' }), null);
+});
+
 test('isLocalMd recognizes local .md links only', () => {
   assert.equal(isLocalMd('./x.md'), true);
   assert.equal(isLocalMd('/wiki/t/y.md#sec'), true);

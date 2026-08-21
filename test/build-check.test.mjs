@@ -66,13 +66,15 @@ const runEnv = (dir, env, ...args) =>
   spawnSync('node', ['build.mjs', ...args], { cwd: dir, encoding: 'utf8', env: { ...process.env, ...env } });
 const clean = (dir) => rmSync(dir, { recursive: true, force: true });
 
-// Set package.json `okf.federation` in a sandbox (default off).
-function enableFederation(dir) {
+// Merge keys into the sandbox package.json `okf` block.
+function setOkf(dir, okf) {
   const pkgPath = join(dir, 'package.json');
   const pkg = JSON.parse(readFileSync(pkgPath, 'utf8'));
-  pkg.okf = { ...(pkg.okf || {}), federation: true };
+  pkg.okf = { ...(pkg.okf || {}), ...okf };
   writeFileSync(pkgPath, JSON.stringify(pkg, null, 2));
 }
+
+function enableFederation(dir) { setOkf(dir, { federation: true }); }
 
 // Write a minimal peer wiki: a peers.json pointing at one peer whose site/manifest.json has `pages`.
 // Returns the absolute peers.json path (for OKF_PEERS).
@@ -283,4 +285,42 @@ test('cross-wiki check is skipped (link masked, build succeeds) when federation 
   const r = run(dir, '--check');
   clean(dir);
   assert.equal(r.status, 0, `cross-wiki link must not fail check when off; stderr=${r.stderr}`);
+});
+
+// --- e2e: config-driven vocabularies ----------------------------------------
+
+test('check accepts a custom conceptTypes vocabulary', () => {
+  const dir = sandbox();
+  setOkf(dir, { conceptTypes: ['lesson'] });
+  for (const slug of ['alpha', 'beta']) {
+    writeFileSync(join(dir, `wiki/demo/${slug}.md`),
+      `---\ntype: lesson\ntitle: ${slug}\ndescription: d\n---\n\nbody\n`);
+  }
+  const r = run(dir, '--check');
+  clean(dir);
+  assert.equal(r.status, 0, `expected pass; stderr=${r.stderr}`);
+});
+
+test('an unconfigured clone still mutes a stub card', () => {
+  const dir = sandbox();
+  writeFileSync(join(dir, 'wiki/demo/alpha.md'),
+    '---\ntype: concept\ntitle: A\ndescription: d\nstatus: stub\n---\n\nbody\n');
+  const r = run(dir);
+  const html = readFileSync(join(dir, 'site/index.html'), 'utf8');
+  clean(dir);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(html, /class="card needs-work"/);
+});
+
+test('a custom vocabulary mutes its own needs-work status', () => {
+  const dir = sandbox();
+  setOkf(dir, { statusValues: ['wip', 'done'], needsWorkStatus: 'wip' });
+  writeFileSync(join(dir, 'wiki/demo/alpha.md'),
+    '---\ntype: concept\ntitle: A\ndescription: d\nstatus: wip\n---\n\nbody\n');
+  const r = run(dir);
+  const html = readFileSync(join(dir, 'site/index.html'), 'utf8');
+  clean(dir);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(html, /class="card needs-work"/);
+  assert.ok(!html.includes('class="card wip"'), 'the status word must not become a class');
 });

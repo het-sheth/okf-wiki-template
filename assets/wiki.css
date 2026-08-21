@@ -243,8 +243,8 @@ figcaption { font-family: var(--mono); font-size: .76rem; color: var(--text-fain
 .card .card-title { font-family: var(--mono); font-weight: 600; margin-bottom: 4px; color: var(--text); }
 .card:hover .card-title { color: var(--accent); }
 .card .card-desc { font-size: .85rem; color: var(--text-soft); line-height: 1.5; }
-.card.stub { opacity: .48; }
-.card.stub .card-title::after { content: "  \00b7 planned"; font-size: .7rem; color: var(--text-faint); font-weight: 400; }
+.card.needs-work { opacity: .48; }
+.card.needs-work .card-title::after { content: "  \00b7 planned"; font-size: .7rem; color: var(--text-faint); font-weight: 400; }
 
 /* ---------- timeline ---------- */
 .timeline { list-style: none; padding: 0; margin: 1em 0; }
