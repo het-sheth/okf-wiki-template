@@ -34,18 +34,32 @@ def test_missing_package_json_uses_the_legacy_default_status(tmp_path):
 
 
 def test_configured_status_default_is_used(tmp_path):
+    # statusDefault "deprecated" is neither "stable" nor values[0] ("draft"), so only the
+    # explicit-statusDefault branch of resolve_status can produce this value.
     _run(tmp_path, FIX / "headingless.txt", "markitdown",
-         okf={"statusValues": ["draft", "stable", "deprecated"], "statusDefault": "stable"})
+         okf={"statusValues": ["draft", "stable", "deprecated"], "statusDefault": "deprecated"})
+    stub = (tmp_path / "wiki/test/headingless.md").read_text()
+    assert "status: deprecated" in stub
+    assert "timestamp:" not in stub
+
+
+def test_status_values_without_default_prefers_stable(tmp_path):
+    # no statusDefault, so only the "stable" in values branch can produce this value; the
+    # values[0] fallback would return "draft" instead.
+    _run(tmp_path, FIX / "headingless.txt", "markitdown",
+         okf={"statusValues": ["draft", "stable", "deprecated"]})
     stub = (tmp_path / "wiki/test/headingless.md").read_text()
     assert "status: stable" in stub
     assert "timestamp:" not in stub
 
 
-def test_status_values_without_default_prefers_stable(tmp_path):
+def test_status_values_without_stable_or_default_uses_first_value(tmp_path):
+    # neither "stable" nor an explicit statusDefault is present, so only the values[0]
+    # fallback branch can produce this value.
     _run(tmp_path, FIX / "headingless.txt", "markitdown",
-         okf={"statusValues": ["draft", "stable", "deprecated"]})
+         okf={"statusValues": ["draft", "deprecated"]})
     stub = (tmp_path / "wiki/test/headingless.md").read_text()
-    assert "status: stable" in stub
+    assert "status: draft" in stub
     assert "timestamp:" not in stub
 
 
