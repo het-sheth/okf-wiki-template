@@ -1557,7 +1557,71 @@ okf_version: "0.2"
 Run: `npm run check && npm test`
 Expected: PASS both. The concept count is unchanged: `index.md` is reserved, not a concept.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 6: Make a failing build exit non-zero**
+
+Added after the plan was written. `build.mjs` currently reports validation problems and then
+renders anyway, because the exit is guarded by check mode:
+
+```javascript
+  const problems = validate(collected);
+  if (problems.length) {
+    console.error('OKF check problems:\n  ' + problems.join('\n  '));
+    if (CHECK) process.exit(1);
+  }
+```
+
+So `npm run build` prints "OKF check problems" and exits 0, which is why a broken bundle can be
+published without anyone noticing. A gate that reports a failure and returns success is not a
+gate. The same defect exists in the sibling lineage, so fix it here rather than porting it.
+
+Write the failing test first. Append to `test/build-check.test.mjs`:
+
+```javascript
+test('build exits non-zero when validation fails, not just check', () => {
+  const dir = sandbox();
+  writeFileSync(join(dir, 'wiki/demo/alpha.md'),
+    '---\ntype: concept\ntitle: A\ndescription: d\n---\n\nSee [x](./does-not-exist.md).\n');
+  const r = run(dir);
+  clean(dir);
+  assert.equal(r.status, 1, 'a bundle that fails validation must fail the build');
+  assert.match(r.stderr, /broken link/);
+});
+
+test('build does not write site/ when validation fails', () => {
+  const dir = sandbox();
+  writeFileSync(join(dir, 'wiki/demo/alpha.md'),
+    '---\ntype: concept\ntitle: A\ndescription: d\n---\n\nSee [x](./does-not-exist.md).\n');
+  run(dir);
+  const wrote = existsSync(join(dir, 'site'));
+  clean(dir);
+  assert.equal(wrote, false, 'a failed build must not leave a stale or partial site/');
+});
+```
+
+Run: `node --test test/build-check.test.mjs`
+Expected: FAIL. The build currently exits 0 and writes `site/`.
+
+Then replace the exact block quoted above with:
+
+```javascript
+  const problems = validate(collected);
+  if (problems.length) {
+    console.error('OKF check problems:\n  ' + problems.join('\n  '));
+    // Non-zero in BOTH modes. Build mode used to fall through and render, so a bundle that
+    // failed validation still published and still exited 0.
+    process.exit(1);
+  }
+```
+
+Run: `node --test test/build-check.test.mjs`
+Expected: PASS.
+
+- [ ] **Step 7: Run the gate**
+
+Run: `npm run check && npm test && npm run build`
+Expected: PASS all three. `npm run build` must still succeed on the real wiki, which is clean.
+
+- [ ] **Step 8: Commit**
 
 ```bash
 git add build.mjs wiki/index.md test/fixtures test/build-check.test.mjs
