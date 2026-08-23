@@ -157,6 +157,32 @@ test('generated and verified must carry by and at', () => {
   assert.match(isoViolations({ stale_after: '2027-13-99' })[0], /not an ISO date/);
 });
 
+// gray-matter's default YAML engine resolves an unquoted timestamp-shaped frontmatter scalar
+// into a real Date before this code ever runs, so these two functions must accept a Date
+// instance directly, not just a string. `new Date('nonsense')` is still `instanceof Date`
+// (an Invalid Date), so it must still be caught as a violation.
+test('isoViolations accepts a valid Date instance for stale_after', () => {
+  assert.deepEqual(isoViolations({ stale_after: new Date('2027-01-01') }), []);
+});
+
+test('isoViolations rejects an Invalid Date instance for stale_after', () => {
+  assert.match(isoViolations({ stale_after: new Date('nonsense') })[0], /not an ISO date/);
+});
+
+test('isoViolations accepts a valid Date instance for generated.at', () => {
+  assert.deepEqual(
+    isoViolations({ generated: { by: 'human:x', at: new Date('2026-01-01T00:00:00Z') } }),
+    []
+  );
+});
+
+test('isoViolations rejects an Invalid Date instance for generated.at', () => {
+  assert.match(
+    isoViolations({ generated: { by: 'x', at: new Date('nonsense') } })[0],
+    /not ISO 8601/
+  );
+});
+
 test('source ids must be unique and every footnote must resolve', () => {
   const data = { sources: [{ id: 'a', resource: 'r', title: 't' }] };
   assert.deepEqual(sourceViolations(data, 'claim[^a]\n\n[^a]: note\n'), []);
