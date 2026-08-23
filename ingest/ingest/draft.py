@@ -22,16 +22,32 @@ def extract_headings(markdown: str) -> list[str]:
     return out
 
 
-def build_stub(*, title: str, raw_path: str, headings: list[str], timestamp: str) -> str:
+def build_stub(*, title: str, raw_path: str, headings: list[str], timestamp: str, status: str) -> str:
+    if not status:
+        raise ValueError(
+            "ingest needs a resolvable status: set `okf.statusDefault` in package.json"
+        )
     front = (
         "---\n"
         "type: concept\n"
         f"title: {yaml_str(title)}\n"
-        "status: stub\n"
-        f"timestamp: {timestamp}\n"
+        f"status: {status}\n"
+        f'generated: {{ by: "tool:ingest", at: "{timestamp}" }}\n'
         f"resource: {yaml_str(raw_path)}\n"
+        "sources:\n"
+        "  - id: raw-source\n"
+        f"    resource: {yaml_str(raw_path)}\n"
+        f"    title: {yaml_str(title)}\n"
         "---\n"
     )
     outline = (BANNER + "\n\n" + "\n\n".join(headings) + "\n") if headings else (NO_OUTLINE + "\n")
-    citations = f"\n# Citations\n\n- `{raw_path}`\n"
-    return front + "\n" + outline + citations
+    # The marker keeps the declared source from being orphaned under the v0.2 profile: every
+    # declared source id must be referenced from the body. The footnote line is wrapped in inline
+    # code, not written as a bare markdown reference-link definition: an unwrapped
+    # "[^raw-source]: raw/..." line is valid reference-link-definition syntax, which would make
+    # the checker resolve raw/... as a clickable wiki link and fail (raw/ is cited, never linked).
+    attribution = (
+        f"\nExtracted from the source document.[^raw-source]\n\n"
+        f"`[^raw-source]: {raw_path}`\n"
+    )
+    return front + "\n" + outline + attribution

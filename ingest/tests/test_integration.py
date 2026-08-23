@@ -1,3 +1,4 @@
+import json
 import shutil
 import pytest
 from pathlib import Path
@@ -6,9 +7,11 @@ from ingest.cli import main
 FIX = Path(__file__).resolve().parents[1] / "fixtures"
 
 
-def _run(tmp_path, src, engine):
-    for d in ["wiki/test", "raw/test", "log"]:
+def _run(tmp_path, src, engine, okf=None):
+    for d in ("raw", "wiki"):
         (tmp_path / d).mkdir(parents=True, exist_ok=True)
+    if okf is not None:
+        (tmp_path / "package.json").write_text(json.dumps({"name": "t", "okf": okf}))
     return main([str(src), "--topic", "test", "--engine", engine, "--wiki-root", str(tmp_path)])
 
 
@@ -17,10 +20,17 @@ def test_headingless_source_yields_no_outline_banner(tmp_path):
     assert code == 0
     stub = (tmp_path / "wiki/test/headingless.md").read_text()
     assert "no outline was extracted" in stub
-    # no fabricated headings in the body — the only heading is the fixed "# Citations" section
+    # no heading is fabricated in the body; the Citations heading is gone under v0.2
     body = stub.split("---", 2)[-1]
     headings = [ln for ln in body.splitlines() if ln.startswith("#")]
-    assert headings == ["# Citations"]
+    assert headings == []
+
+
+def test_missing_package_json_uses_the_legacy_default_status(tmp_path):
+    _run(tmp_path, FIX / "headingless.txt", "markitdown")
+    stub = (tmp_path / "wiki/test/headingless.md").read_text()
+    assert "status: stub" in stub
+    assert "timestamp:" not in stub
 
 
 @pytest.mark.skipif(shutil.which("soffice") is None, reason="LibreOffice not installed")
