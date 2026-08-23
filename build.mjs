@@ -212,7 +212,16 @@ function validate({ concepts, reserved, rawDocs }) {
   // legitimately carry example frontmatter, and journal notes are freeform.
   for (const r of [...reserved, ...rawDocs.filter((d) => d.reserved)]) {
     if (isReservedPath(r.repoRel)) continue;
-    if (hasFrontmatter(r.raw)) problems.push(`${r.repoRel} -> reserved file (${r.base}) must have no frontmatter`);
+    if (!hasFrontmatter(r.raw)) continue;
+    // SPEC 12: the bundle-root index.md is the ONE place frontmatter is permitted, and only to
+    // declare okf_version. Every other index.md, and any other key here, stays rejected.
+    if (r.repoRel === 'wiki/index.md') {
+      const keys = Object.keys(matter(r.raw).data);
+      if (keys.length === 1 && keys[0] === 'okf_version') continue;
+      problems.push(`${r.repoRel} -> bundle-root index.md may declare only \`okf_version\``);
+      continue;
+    }
+    problems.push(`${r.repoRel} -> reserved file (${r.base}) must have no frontmatter`);
   }
   // concept type rules
   for (const c of concepts) {
@@ -397,7 +406,9 @@ function main() {
   const problems = validate(collected);
   if (problems.length) {
     console.error('OKF check problems:\n  ' + problems.join('\n  '));
-    if (CHECK) process.exit(1);
+    // Non-zero in BOTH modes. Build mode used to fall through and render, so a bundle that
+    // failed validation still published and still exited 0.
+    process.exit(1);
   }
   if (CHECK) {
     console.log(`check ok: ${collected.concepts.length} concepts, ${problems.length} problems`);

@@ -412,3 +412,45 @@ test('the legacy fixture fails check, and migrate makes it pass', () => {
   clean(dir);
   assert.equal(after.status, 0, `migrated fixture must pass; stderr=${after.stderr}`);
 });
+
+// --- e2e: okf_version on the bundle root ------------------------------------
+
+test('the bundle-root index.md may declare only okf_version', () => {
+  const dir = sandbox();
+  writeFileSync(join(dir, 'wiki/index.md'), '---\nokf_version: "0.2"\n---\n\n# Demo wiki\n');
+  const r = run(dir, '--check');
+  clean(dir);
+  assert.equal(r.status, 0, `expected pass; stderr=${r.stderr}`);
+});
+
+test('the bundle-root index.md rejects any other key', () => {
+  expectCheckFails((dir) => writeFileSync(
+    join(dir, 'wiki/index.md'), '---\nokf_version: "0.2"\ntitle: Nope\n---\n\n# Demo\n'
+  ), /may declare only `okf_version`/);
+});
+
+test('a non-root index.md still rejects all frontmatter', () => {
+  expectCheckFails((dir) => writeFileSync(
+    join(dir, 'wiki/demo/index.md'), '---\nokf_version: "0.2"\n---\n\n# Demo\n'
+  ), /must have no frontmatter/);
+});
+
+test('build exits non-zero when validation fails, not just check', () => {
+  const dir = sandbox();
+  writeFileSync(join(dir, 'wiki/demo/alpha.md'),
+    '---\ntype: concept\ntitle: A\ndescription: d\n---\n\nSee [x](./does-not-exist.md).\n');
+  const r = run(dir);
+  clean(dir);
+  assert.equal(r.status, 1, 'a bundle that fails validation must fail the build');
+  assert.match(r.stderr, /broken link/);
+});
+
+test('build does not write site/ when validation fails', () => {
+  const dir = sandbox();
+  writeFileSync(join(dir, 'wiki/demo/alpha.md'),
+    '---\ntype: concept\ntitle: A\ndescription: d\n---\n\nSee [x](./does-not-exist.md).\n');
+  run(dir);
+  const wrote = existsSync(join(dir, 'site'));
+  clean(dir);
+  assert.equal(wrote, false, 'a failed build must not leave a stale or partial site/');
+});
