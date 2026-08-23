@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { marked } from 'marked';
 import {
   DEFAULT_STATUS_MAP, migrateFrontmatter, migrateBody, parseStatusMap,
 } from '../lib/migrate.mjs';
@@ -93,6 +94,48 @@ test('a citation with neither a URL nor a backticked path falls back to the whol
   const { sources } = migrateBody('A.\n\n# Citations\n\n- Just some plain text\n', new Set());
   assert.equal(sources[0].resource, 'Just some plain text');
   assert.equal(sources[0].title, 'Just some plain text');
+});
+
+test('a non-URL resource\'s definition line is wrapped whole in inline code', () => {
+  const { content, sources } = migrateBody(
+    'A.\n\n# Citations\n\n- Design spec, `docs/spec.md`\n', new Set());
+  const id = sources[0].id;
+  assert.ok(content.includes(`\`[^${id}]: docs/spec.md\``),
+    'the entire definition line, marker included, must be one inline code span');
+});
+
+test('a URL resource\'s definition line is left bare so it renders as a real link', () => {
+  const { content, sources } = migrateBody(
+    'A.\n\n# Citations\n\n- OKF spec, https://example.com/spec\n', new Set());
+  const id = sources[0].id;
+  assert.ok(content.includes(`[^${id}]: https://example.com/spec`));
+  assert.ok(!content.includes(`\`[^${id}]: https://example.com/spec\``),
+    'a URL definition must not be wrapped in inline code');
+});
+
+test('marked never emits a link-reference-definition token for a non-URL citation', () => {
+  // This is the assertion that would have caught the round-1 regression: wrapping only the
+  // destination in backticks still let `marked` register a `def` token whose href carried the
+  // backticks, which then rendered as a broken anchor even though `isLocalMd` (and so `check`)
+  // was fooled by the trailing backtick. Wrapping the whole line in inline code must mean
+  // `marked` never parses it as a link reference definition at all.
+  const { content } = migrateBody(
+    'A.\n\n# Citations\n\n- Design spec, `docs/spec.md`\n', new Set());
+  const tokens = marked.lexer(content);
+  const defs = [];
+  marked.walkTokens(tokens, (tok) => { if (tok.type === 'def') defs.push(tok); });
+  assert.deepEqual(defs, [], 'no def token may be produced for a non-URL resource');
+});
+
+test('marked still emits a real link-reference-definition token for a URL citation', () => {
+  const { content, sources } = migrateBody(
+    'A.\n\n# Citations\n\n- OKF spec, https://example.com/spec\n', new Set());
+  const tokens = marked.lexer(content);
+  const defs = [];
+  marked.walkTokens(tokens, (tok) => { if (tok.type === 'def') defs.push(tok); });
+  assert.equal(defs.length, 1, 'a URL resource should still define a real link reference');
+  assert.equal(defs[0].href, 'https://example.com/spec');
+  assert.equal(defs[0].tag, `^${sources[0].id.toLowerCase()}`);
 });
 
 test('parseStatusMap reads the CLI form and extends the default', () => {

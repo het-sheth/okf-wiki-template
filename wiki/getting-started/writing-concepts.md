@@ -22,4 +22,4 @@ External sources are declared in frontmatter under `sources:` and referenced fro
 by a footnote marker, not under a `# Citations` heading. To cite source material under
 `raw/`, reference it as inline code like `raw/getting-started/notes.md`.
 
-[^docs-superpowers-specs-2026]: `docs/superpowers/specs/2026-06-27-okf-wiki-template-design.md`
+`[^docs-superpowers-specs-2026]: docs/superpowers/specs/2026-06-27-okf-wiki-template-design.md`
