@@ -70,6 +70,31 @@ test('migration is idempotent', () => {
   assert.deepEqual(b2.sources, []);
 });
 
+test('a "Title, `path`" citation splits the title from the backticked resource', () => {
+  const { sources } = migrateBody('A.\n\n# Citations\n\n- Design spec, `docs/spec.md`\n', new Set());
+  assert.equal(sources[0].resource, 'docs/spec.md');
+  assert.equal(sources[0].title, 'Design spec');
+});
+
+test('a "Title, url" citation splits the title from the URL resource', () => {
+  const { sources } = migrateBody(
+    'A.\n\n# Citations\n\n- OKF spec, https://example.com/spec\n', new Set());
+  assert.equal(sources[0].resource, 'https://example.com/spec');
+  assert.equal(sources[0].title, 'OKF spec');
+});
+
+test('a bare URL citation keeps today\'s behavior: resource and title are equal', () => {
+  const { sources } = migrateBody('A.\n\n# Citations\n\n- https://example.com/a\n', new Set());
+  assert.equal(sources[0].resource, 'https://example.com/a');
+  assert.equal(sources[0].title, 'https://example.com/a');
+});
+
+test('a citation with neither a URL nor a backticked path falls back to the whole item', () => {
+  const { sources } = migrateBody('A.\n\n# Citations\n\n- Just some plain text\n', new Set());
+  assert.equal(sources[0].resource, 'Just some plain text');
+  assert.equal(sources[0].title, 'Just some plain text');
+});
+
 test('parseStatusMap reads the CLI form and extends the default', () => {
   const m = parseStatusMap('mystery=draft,solid=deprecated');
   assert.equal(m.mystery, 'draft');
