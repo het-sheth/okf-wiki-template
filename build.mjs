@@ -12,6 +12,8 @@ import {
   esc, escAttr, summary, isReserved, isReservedPath, typeViolation,
   isLocalMd, resolveLinkTarget, siteRelFromRepoRel,
   scanWikilinks, extractCrossLinks, withinWikiSiteRel,
+  prohibitedKeyViolations, citationsHeadingViolation, isoViolations, sourceViolations,
+  supersessionViolations, statusViolation,
 } from './lib/okf.mjs';
 import { resolveOkfConfig } from './lib/config.mjs';
 
@@ -217,6 +219,20 @@ function validate({ concepts, reserved, rawDocs }) {
     const v = typeViolation({ area: 'wiki', type: c.data.type, conceptTypes: CFG.conceptTypes });
     if (v) problems.push(`${c.key} -> ${v}`);
   }
+  // v0.2 profile: prohibited legacy forms, frontmatter shapes, source and footnote integrity,
+  // and status vocabulary membership.
+  for (const c of concepts) {
+    for (const m of prohibitedKeyViolations(c.data)) problems.push(`${c.key} -> ${m}`);
+    const heading = citationsHeadingViolation(c.content);
+    if (heading) problems.push(`${c.key} -> ${heading}`);
+    for (const m of isoViolations(c.data)) problems.push(`${c.key} -> ${m}`);
+    for (const m of sourceViolations(c.data, c.content)) problems.push(`${c.key} -> ${m}`);
+    const sv = statusViolation(c.data, CFG.statusValues);
+    if (sv) problems.push(`${c.key} -> ${sv}`);
+  }
+  problems.push(
+    ...supersessionViolations(concepts.map((c) => ({ key: c.key, supersededBy: c.data.superseded_by })))
+  );
   for (const d of rawDocs) {
     if (d.reserved) continue;
     const v = typeViolation({ area: 'raw', type: d.data.type });

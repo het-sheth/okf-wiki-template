@@ -324,3 +324,91 @@ test('a custom vocabulary mutes its own needs-work status', () => {
   assert.match(html, /class="card needs-work"/);
   assert.ok(!html.includes('class="card wip"'), 'the status word must not become a class');
 });
+
+test('check fails on a prohibited timestamp key', () => {
+  expectCheckFails((dir) => writeFileSync(
+    join(dir, 'wiki/demo/alpha.md'),
+    '---\ntype: concept\ntitle: A\ndescription: d\ntimestamp: 2026-01-01T00:00:00Z\n---\n\nbody\n'
+  ), /`timestamp` is prohibited by this profile/);
+});
+
+test('check fails on a prohibited Citations heading', () => {
+  expectCheckFails((dir) => writeFileSync(
+    join(dir, 'wiki/demo/alpha.md'),
+    '---\ntype: concept\ntitle: A\ndescription: d\n---\n\nbody\n\n# Citations\n\n- x\n'
+  ), /use `sources:`/);
+});
+
+test('check fails on an unresolved footnote marker', () => {
+  expectCheckFails((dir) => writeFileSync(
+    join(dir, 'wiki/demo/alpha.md'),
+    '---\ntype: concept\ntitle: A\ndescription: d\n---\n\nclaim[^ghost]\n'
+  ), /footnote \[\^ghost\]/);
+});
+
+test('check fails on a dangling superseded_by regardless of archival config', () => {
+  expectCheckFails((dir) => writeFileSync(
+    join(dir, 'wiki/demo/alpha.md'),
+    '---\ntype: concept\ntitle: A\ndescription: d\nsuperseded_by: demo/ghost\n---\n\nbody\n'
+  ), /no such page/);
+});
+
+test('check fails on a two-page superseded_by cycle', () => {
+  expectCheckFails((dir) => {
+    writeFileSync(join(dir, 'wiki/demo/alpha.md'),
+      '---\ntype: concept\ntitle: A\ndescription: d\nsuperseded_by: demo/beta\n---\n\nbody\n');
+    writeFileSync(join(dir, 'wiki/demo/beta.md'),
+      '---\ntype: concept\ntitle: B\ndescription: d\nsuperseded_by: demo/alpha\n---\n\nbody\n');
+  }, /cycle/);
+});
+
+test('a past stale_after is not a check failure', () => {
+  const dir = sandbox();
+  writeFileSync(join(dir, 'wiki/demo/alpha.md'),
+    '---\ntype: concept\ntitle: A\ndescription: d\nstale_after: 2020-01-01\n---\n\nbody\n');
+  const r = run(dir, '--check');
+  clean(dir);
+  assert.equal(r.status, 0, `staleness is advisory; stderr=${r.stderr}`);
+});
+
+// A YAML-shaped-but-out-of-range date (e.g. month 13) is not a useful malformed case here:
+// gray-matter's default YAML engine resolves it into a real (silently rolled-over) Date before
+// this code ever runs, the same way it resolves a valid date. A value that never matches the
+// YAML timestamp grammar at all is the only kind of malformed input a frontmatter round trip
+// can still exercise.
+test('check fails on a malformed stale_after', () => {
+  expectCheckFails((dir) => writeFileSync(
+    join(dir, 'wiki/demo/alpha.md'),
+    '---\ntype: concept\ntitle: A\ndescription: d\nstale_after: 2027/01/01\n---\n\nbody\n'
+  ), /not an ISO date/);
+});
+
+test('check fails on a status outside the configured vocabulary', () => {
+  expectCheckFails((dir) => {
+    setOkf(dir, { statusValues: ['draft', 'stable', 'deprecated'] });
+    writeFileSync(join(dir, 'wiki/demo/alpha.md'),
+      '---\ntype: concept\ntitle: A\ndescription: d\nstatus: solid\n---\n\nbody\n');
+  }, /`status: solid`.*draft, stable, deprecated/s);
+});
+
+test('a page with no status does not fail the status check', () => {
+  const dir = sandbox();
+  setOkf(dir, { statusValues: ['draft', 'stable', 'deprecated'] });
+  writeFileSync(join(dir, 'wiki/demo/alpha.md'),
+    '---\ntype: concept\ntitle: A\ndescription: d\n---\n\nbody\n');
+  const r = run(dir, '--check');
+  clean(dir);
+  assert.equal(r.status, 0, r.stderr);
+});
+
+test('the legacy fixture fails check, and migrate makes it pass', () => {
+  const dir = sandbox('legacy-v01');
+  cpSync(join(ROOT, 'scripts'), join(dir, 'scripts'), { recursive: true });
+  const before = run(dir, '--check');
+  assert.equal(before.status, 1, 'the v0.1 fixture must be rejected');
+  const mig = spawnSync('node', ['scripts/migrate.mjs'], { cwd: dir, encoding: 'utf8' });
+  assert.equal(mig.status, 0, mig.stderr);
+  const after = run(dir, '--check');
+  clean(dir);
+  assert.equal(after.status, 0, `migrated fixture must pass; stderr=${after.stderr}`);
+});
