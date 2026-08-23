@@ -10,7 +10,8 @@
     "check": "node build.mjs --check",
     "test": "node --test",
     "ingest": "node scripts/ingest.mjs",
-    "migrate": "node scripts/migrate.mjs"
+    "migrate": "node scripts/migrate.mjs",
+    "upgrade": "node scripts/upgrade.mjs"
   },
   "dependencies": {
     "gray-matter": "4.0.3",
