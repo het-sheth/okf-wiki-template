@@ -33,6 +33,22 @@ def test_missing_package_json_uses_the_legacy_default_status(tmp_path):
     assert "timestamp:" not in stub
 
 
+def test_configured_status_default_is_used(tmp_path):
+    _run(tmp_path, FIX / "headingless.txt", "markitdown",
+         okf={"statusValues": ["draft", "stable", "deprecated"], "statusDefault": "stable"})
+    stub = (tmp_path / "wiki/test/headingless.md").read_text()
+    assert "status: stable" in stub
+    assert "timestamp:" not in stub
+
+
+def test_status_values_without_default_prefers_stable(tmp_path):
+    _run(tmp_path, FIX / "headingless.txt", "markitdown",
+         okf={"statusValues": ["draft", "stable", "deprecated"]})
+    stub = (tmp_path / "wiki/test/headingless.md").read_text()
+    assert "status: stable" in stub
+    assert "timestamp:" not in stub
+
+
 @pytest.mark.skipif(shutil.which("soffice") is None, reason="LibreOffice not installed")
 def test_legacy_ppt_normalizes_and_drafts(tmp_path):
     code = _run(tmp_path, FIX / "final-review-462.ppt", "markitdown")
