@@ -15,7 +15,7 @@ ingest turns PDFs/docs into source pages.
 The wiki is Markdown-canonical, so the everyday loop is just **write → `npm run check`**: edit pages
 in any text editor, or open `wiki/` as an [Obsidian](https://obsidian.md) vault, and run `npm run
 check` to validate the OKF profile. The static site (`site/`) is generated and exists only if you
-want to publish or federate — see below. It's not part of the routine loop.
+want to publish or federate: see below. It's not part of the routine loop.
 
 ## Optional: publishing & federation
 `npm run build` regenerates `site/` (static HTML) and writes `site/manifest.json` for a local
@@ -49,9 +49,9 @@ A git merge is not the upgrade path. See [upgrading a clone](docs/upgrading.md).
 - `example-second-brain`: one person's context layer, including journal and capture workflow. See [composing the layers](docs/composing.md).
 
 ## Commands
-- `npm run check` — validate the OKF profile; non-zero exit on any violation. The everyday gate.
-- `npm test` — `node --test` (helper unit tests + end-to-end conformance).
-- `npm run build` — regenerate `site/` (optional; publishing/federation only — do not hand-edit `site/`).
+- `npm run check`: validate the OKF profile; non-zero exit on any violation. The everyday gate.
+- `npm test`: `node --test` (helper unit tests + end-to-end conformance).
+- `npm run build`: regenerate `site/` (optional; publishing/federation only: do not hand-edit `site/`).
 
 > [!NOTE]
 > `npm audit` reports 2 moderate transitive advisories from the pinned `gray-matter` (via `js-yaml`).
@@ -59,10 +59,10 @@ A git merge is not the upgrade path. See [upgrading a clone](docs/upgrading.md).
 > feed this pipeline untrusted Markdown, be aware of those advisories.
 
 ## Layout
-- `wiki/<topic>/<slug>.md` — concept pages (canonical).
-- `wiki/<topic>/index.md` — optional, no-frontmatter intro prose (listing is auto-generated).
-- `raw/<topic>/` — immutable source material.
-- `site/` — generated HTML (gitignored).
+- `wiki/<topic>/<slug>.md`: concept pages (canonical).
+- `wiki/<topic>/index.md`: optional, no-frontmatter intro prose (listing is auto-generated).
+- `raw/<topic>/`: immutable source material.
+- `site/`: generated HTML (gitignored).
 
 ## Optional: document ingestion
 This template includes a Python ingest pipeline (`ingest/`, `scripts/ingest.mjs`) for converting

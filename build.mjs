@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // okf-wiki-template generator: wiki/**/*.md -> site/ (deterministic, no LLM).
-// Strict OKF profile. Markdown in wiki/ is canonical; site/ is generated — never hand-edit it.
+// Strict OKF profile. Markdown in wiki/ is canonical; site/ is generated, never hand-edit it.
 import { readFileSync, writeFileSync, readdirSync, mkdirSync, existsSync, rmSync, cpSync, realpathSync } from 'node:fs';
 import { join, dirname, relative, basename, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -32,13 +32,13 @@ const WIKI_TITLE = CFG.title || WIKI_NAME;
 // --- federation (cross-wiki) config -----------------------------------------
 // Opt-in, DEFAULT OFF (R3): a wiki only resolves cross-wiki links to real hrefs when its own
 // package.json sets `okf.federation: true`. With it off, cross-wiki links are still parsed and
-// masked — the raw token and peer/topic/slug names never reach the generated HTML.
+// masked: the raw token and peer/topic/slug names never reach the generated HTML.
 const FEDERATION = CFG.federation;
 // peers.json discovery: OKF_PEERS env var wins, else the default sibling hub path.
 const PEERS_PATH = env.OKF_PEERS || join(ROOT, '..', 'knowledge-hub', 'peers.json');
 
 // peer name -> { manifest, siteRoot } for every federated peer whose manifest is present.
-// Empty when federation is off or peers.json / manifests are missing — callers degrade gracefully.
+// Empty when federation is off or peers.json / manifests are missing: callers degrade gracefully.
 function loadPeers() {
   const peers = new Map();
   if (!FEDERATION || !existsSync(PEERS_PATH)) return peers;
@@ -89,7 +89,7 @@ function walk(dir) {
 
 // --- link handling via marked tokens (skips code blocks/spans; parses parens correctly) ---
 
-// Return local .md link hrefs found in a markdown string (images excluded — they are
+// Return local .md link hrefs found in a markdown string (images excluded: they are
 // `image` tokens, not `link`). Exported for tests.
 export function localMdLinksIn(md) {
   const out = [];
@@ -127,10 +127,10 @@ renderer.link = function ({ href, title, tokens }) {
 };
 marked.use({ renderer });
 
-// Replace every `[[...]]` wikilink with an <a> (or masked text) BEFORE marked runs — mirrors
+// Replace every `[[...]]` wikilink with an <a> (or masked text) BEFORE marked runs: mirrors
 // education-wiki's preprocess approach. `outDir` is the rendered page's site dir; `topic` is the
 // page's topic (for resolving bare [[slug]]). Cross-wiki links are ALWAYS masked when federation
-// is off: only the human label (or a neutral placeholder) is emitted — never the peer/topic/slug.
+// is off: only the human label (or a neutral placeholder) is emitted, never the peer/topic/slug.
 function preprocessWikilinks(md, { topic, outDir }) {
   return String(md).replace(/\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g, (raw, target, label) => {
     const [w] = scanWikilinks(raw);
@@ -208,7 +208,7 @@ function validate({ concepts, reserved, rawDocs }) {
   const conceptPaths = new Set(concepts.map((c) => c.repoRel)); // linkable targets
 
   // reserved files (index.md / log.md, in wiki/ or raw/) must have no frontmatter.
-  // Directory-reserved files (_templates/ scaffolding, journal/ inbox) are exempt — templates
+  // Directory-reserved files (_templates/ scaffolding, journal/ inbox) are exempt: templates
   // legitimately carry example frontmatter, and journal notes are freeform.
   for (const r of [...reserved, ...rawDocs.filter((d) => d.reserved)]) {
     if (isReservedPath(r.repoRel)) continue;
@@ -380,7 +380,7 @@ ${sections}`;
 }
 
 // --- manifest ---------------------------------------------------------------
-// site/manifest.json — the deterministic, no-LLM federation descriptor the hub reads.
+// site/manifest.json: the deterministic, no-LLM federation descriptor the hub reads.
 // `id` is the stable cross-wiki identifier (topic/slug); `links` is the page's outgoing
 // cross-wiki references, which the hub turns into "referenced by" backlinks.
 export function buildManifest(concepts) {
