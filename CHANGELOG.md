@@ -43,3 +43,6 @@ MAJOR: the accepted-document set shrinks and a migration is required.
 Run `npm run upgrade -- --release v2.0.0`, then `npm run migrate`, then `npm run check`. See
 `docs/upgrading.md`. A clone with no `okf` block keeps the legacy vocabulary; adopting the v0.2
 vocabulary is a separate, deliberate step.
+The run is not atomic across `npm install`: a failed install can leave engine files updated while
+the lockfile is stale. In that case the template version is not advanced, so fix installation and
+rerun the same release to converge.
