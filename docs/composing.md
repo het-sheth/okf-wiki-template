@@ -29,7 +29,7 @@ The journal is an inbox, not a destination.
 Add one line to the `Paths` section of the machine file that the rulebook assembles:
 
 ```markdown
-- ~/wiki/<subject> — OKF wiki about <subject>. Navigate by reading its `AGENTS.md` and
+- ~/wiki/<subject>: OKF wiki about <subject>. Navigate by reading its `AGENTS.md` and
   `topics.json` first, then the relevant `wiki/<topic>/<slug>.md`. Never grep the tree.
 ```
 

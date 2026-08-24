@@ -7,8 +7,7 @@ ingest turns PDFs/docs into source pages.
 
 ## Use this template
 1. Click **"Use this template"** on GitHub (or clone this repo).
-2. Rename in three places: `name` in `package.json`, the topic list in `topics.json`, and the title
-   of this README.
+2. Rename `name` in `package.json` and replace the topic list in `topics.json`.
 3. `npm install`
 4. Write pages under `wiki/<topic>/`, then `npm run check` to validate.
 
@@ -24,10 +23,30 @@ knowledge hub. Run it only when you want to publish the wiki or federate it with
 not needed to author, validate, or read the wiki day to day.
 
 ## What's an OKF profile?
-OKF (Google Cloud, v0.1) is a vendor-neutral Markdown standard for giving AI agents curated context.
+OKF (Google Cloud, v0.2) is a vendor-neutral Markdown standard for giving AI agents curated context.
 This template ships a *strict profile*: every bundle it produces is valid OKF, but `npm run check`
 adds extra rules (typed concepts, resolved links, reserved-file discipline) to keep wikis tidy. See
-`AGENTS.md` for the full schema and conventions.
+`AGENTS.md` for the short normative rules and [the full profile](docs/okf-profile.md) for field
+tables and examples.
+
+## Compatibility
+
+| Template version | OKF spec version | Node floor |
+|---|---|---|
+| 2.0.0 | 0.2 | >=20 |
+
+## Upgrading
+
+```bash
+npm run upgrade -- --release <tag>
+```
+
+A git merge is not the upgrade path. See [upgrading a clone](docs/upgrading.md).
+
+## Related
+
+- `example-agent-rules`: the short, every-session behavior layer. See [composing the layers](docs/composing.md).
+- `example-second-brain`: one person's context layer, including journal and capture workflow. See [composing the layers](docs/composing.md).
 
 ## Commands
 - `npm run check` — validate the OKF profile; non-zero exit on any violation. The everyday gate.
