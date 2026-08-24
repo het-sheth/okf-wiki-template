@@ -16,7 +16,8 @@ import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import {
-  ENGINE_PATHS, REQUIRED_RELEASE_FILES, patchPackageJson, replaceMarkedBlock, configTransition, MARKER,
+  ENGINE_PATHS, REQUIRED_RELEASE_FILES, patchPackageJson, replaceMarkedBlock, configTransition,
+  MARKER, expectedSum,
 } from '../lib/upgrade.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -27,16 +28,6 @@ const REPO = 'https://github.com/het-sheth/okf-wiki-template';
 
 const die = (msg) => { console.error(`upgrade: ${msg}`); process.exit(1); };
 const log = (m) => console.log(m);
-
-// SHA256SUMS is `<hex>  <name>` per line. Match the line naming this asset rather than trusting
-// position, so a release that also lists other assets still verifies.
-function expectedSum(sums, name) {
-  const lines = sums.split('\n').map((l) => l.trim()).filter(Boolean);
-  const hit = lines.find((l) => l.split(/\s+/).slice(1).join(' ').replace(/^\*/, '') === name);
-  if (hit) return hit.split(/\s+/)[0];
-  if (lines.length === 1) return lines[0].split(/\s+/)[0];
-  return null;
-}
 
 // --- 1. stage the release ---------------------------------------------------
 function stageRelease(tag) {
@@ -89,15 +80,28 @@ if (DRY) {
   process.exit(0);
 }
 
-// --- 3. replace engine paths, staging each swap ----------------------------
-for (const p of ENGINE_PATHS) {
-  const s = join(src, p);
-  if (!existsSync(s)) continue;
-  const target = join(ROOT, p);
-  const staged = `${target}.upgrade-new`;
-  rmSync(staged, { recursive: true, force: true });
-  mkdirSync(dirname(target), { recursive: true });
-  cpSync(s, staged, { recursive: true });
+// --- 3. replace engine paths -----------------------------------------------
+// Two phases on purpose. Copying is where the work (and the failure) happens: a full disk, an
+// unreadable source, a permission error. Doing every copy first means such a failure aborts with
+// the clone untouched, instead of half its engine replaced. The swap phase that follows is only
+// renames within the same filesystem.
+const swaps = [];
+try {
+  for (const p of ENGINE_PATHS) {
+    const s = join(src, p);
+    if (!existsSync(s)) continue;
+    const target = join(ROOT, p);
+    const staged = `${target}.upgrade-new`;
+    rmSync(staged, { recursive: true, force: true });
+    mkdirSync(dirname(target), { recursive: true });
+    cpSync(s, staged, { recursive: true });
+    swaps.push([p, target, staged]);
+  }
+} catch (e) {
+  for (const [, , staged] of swaps) rmSync(staged, { recursive: true, force: true });
+  die(`staging failed before anything was replaced: ${e.message}. Nothing was changed.`);
+}
+for (const [p, target, staged] of swaps) {
   rmSync(target, { recursive: true, force: true });
   renameSync(staged, target);
   log(`replaced ${p}`);

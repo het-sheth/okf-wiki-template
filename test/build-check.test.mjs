@@ -445,12 +445,29 @@ test('build exits non-zero when validation fails, not just check', () => {
   assert.match(r.stderr, /broken link/);
 });
 
-test('build does not write site/ when validation fails', () => {
+test('build does not write a partial site/ when validation fails', () => {
   const dir = sandbox();
   writeFileSync(join(dir, 'wiki/demo/alpha.md'),
     '---\ntype: concept\ntitle: A\ndescription: d\n---\n\nSee [x](./does-not-exist.md).\n');
   run(dir);
   const wrote = existsSync(join(dir, 'site'));
   clean(dir);
-  assert.equal(wrote, false, 'a failed build must not leave a stale or partial site/');
+  assert.equal(wrote, false, 'a failed build must not leave a partial site/');
+});
+
+// The test above passes vacuously on a fresh sandbox: site/ never existed. The stale case is the
+// one that bites, because the leftover site/ is a COMPLETE render of the previous, valid tree and
+// reads as current output.
+test('a failed build removes a site/ left by an earlier successful build', () => {
+  const dir = sandbox();
+  const first = run(dir);
+  assert.equal(first.status, 0, first.stderr);
+  assert.ok(existsSync(join(dir, 'site/demo/alpha.html')), 'the first build must publish');
+  writeFileSync(join(dir, 'wiki/demo/alpha.md'),
+    '---\ntype: concept\ntitle: A\ndescription: d\n---\n\nSee [x](./does-not-exist.md).\n');
+  const second = run(dir);
+  const stale = existsSync(join(dir, 'site'));
+  clean(dir);
+  assert.equal(second.status, 1, 'the second build must fail');
+  assert.equal(stale, false, 'a stale site/ must not survive a failed build');
 });

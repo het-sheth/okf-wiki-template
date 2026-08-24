@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  ENGINE_PATHS, patchPackageJson, replaceMarkedBlock, configTransition, MARKER,
+  ENGINE_PATHS, patchPackageJson, replaceMarkedBlock, configTransition, MARKER, expectedSum,
 } from '../lib/upgrade.mjs';
 
 test('the engine manifest excludes every user-owned path', () => {
@@ -138,4 +138,55 @@ test('upgrade refuses to run without a release and changes nothing', () => {
   assert.match(r.stderr, /no default release/);
   assert.equal(readFileSync(join(dir, 'package.json'), 'utf8'), before);
   rmSync(dir, { recursive: true, force: true });
+});
+
+// --- checksum parsing -------------------------------------------------------
+// Extracted from scripts/upgrade.mjs so it is reachable without network or filesystem. This is
+// the one step standing between a clone and running whatever a release download happened to be.
+
+test('expectedSum picks the line naming the asset, not the first line', () => {
+  const sums = [
+    'aaaa  okf-wiki-template-v2.0.0.zip',
+    'bbbb  SOURCES.txt',
+    'cccc  okf-wiki-template-v2.0.0.tar.gz',
+  ].join('\n');
+  assert.equal(expectedSum(sums, 'okf-wiki-template-v2.0.0.tar.gz'), 'cccc');
+});
+
+test('expectedSum handles the binary-mode asterisk prefix', () => {
+  assert.equal(expectedSum('dddd *okf-wiki-template-v2.0.0.tar.gz\n', 'okf-wiki-template-v2.0.0.tar.gz'), 'dddd');
+});
+
+test('expectedSum returns null when the asset has no entry', () => {
+  const sums = 'aaaa  something-else.tar.gz\nbbbb  another.zip\n';
+  assert.equal(expectedSum(sums, 'okf-wiki-template-v2.0.0.tar.gz'), null,
+    'an absent entry must be unverifiable, never silently the first digest');
+});
+
+test('expectedSum accepts a lone bare digest', () => {
+  assert.equal(expectedSum('  eeee  \n', 'okf-wiki-template-v2.0.0.tar.gz'), 'eeee');
+});
+
+test('an incomplete release aborts with the clone untouched', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'okf-up3-'));
+  cpSync(join(ROOT, 'test/fixtures/minimal'), dir, { recursive: true });
+  cpSync(join(ROOT, 'scripts'), join(dir, 'scripts'), { recursive: true });
+  cpSync(join(ROOT, 'lib'), join(dir, 'lib'), { recursive: true });
+  writeFileSync(join(dir, 'lib', 'okf.mjs'), '// stale\n');
+  const pkgBefore = readFileSync(join(dir, 'package.json'), 'utf8');
+
+  // A source tree with a package.json but no lib/okf.mjs is an incomplete release.
+  const badSrc = mkdtempSync(join(tmpdir(), 'okf-bad-'));
+  writeFileSync(join(badSrc, 'package.json'), '{"name":"t","version":"9.9.9"}\n');
+
+  const r = spawnSync('node', ['scripts/upgrade.mjs', '--from', badSrc], { cwd: dir, encoding: 'utf8' });
+  const stale = readFileSync(join(dir, 'lib/okf.mjs'), 'utf8');
+  const pkgAfter = readFileSync(join(dir, 'package.json'), 'utf8');
+  rmSync(dir, { recursive: true, force: true });
+  rmSync(badSrc, { recursive: true, force: true });
+
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /the release is incomplete/);
+  assert.equal(stale, '// stale\n', 'no engine file may be replaced from an incomplete release');
+  assert.equal(pkgAfter, pkgBefore, 'package.json must be untouched');
 });

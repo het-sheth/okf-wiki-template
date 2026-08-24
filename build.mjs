@@ -218,7 +218,7 @@ function validate({ concepts, reserved, rawDocs }) {
     if (r.repoRel === 'wiki/index.md') {
       const keys = Object.keys(matter(r.raw).data);
       if (keys.length === 1 && keys[0] === 'okf_version') continue;
-      problems.push(`${r.repoRel} -> bundle-root index.md may declare only \`okf_version\``);
+      problems.push(`${r.repoRel} -> bundle-root index.md may declare only \`okf_version\`; every other key is prohibited by this profile`);
       continue;
     }
     problems.push(`${r.repoRel} -> reserved file (${r.base}) must have no frontmatter`);
@@ -408,6 +408,14 @@ function main() {
     console.error('OKF check problems:\n  ' + problems.join('\n  '));
     // Non-zero in BOTH modes. Build mode used to fall through and render, so a bundle that
     // failed validation still published and still exited 0.
+    //
+    // A previous successful build leaves a COMPLETE site/ behind, so exiting here without
+    // clearing it publishes the last valid tree as though it were current. site/ is generated
+    // and regenerable from the last good commit, so removing it is the safe direction.
+    if (!CHECK && existsSync(SITE_DIR)) {
+      rmSync(SITE_DIR, { recursive: true, force: true });
+      console.error('removed the now-stale site/; it no longer matches wiki/');
+    }
     process.exit(1);
   }
   if (CHECK) {
