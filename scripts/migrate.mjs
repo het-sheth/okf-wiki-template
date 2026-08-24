@@ -26,6 +26,9 @@ const walk = (dir) => {
   for (const e of readdirSync(dir, { withFileTypes: true })) {
     const p = join(dir, e.name);
     if (e.isDirectory()) out = out.concat(walk(p));
+    else if (e.isSymbolicLink() && e.name.endsWith('.md')) {
+      console.log(`skipped symlink ${relative(ROOT, p)}`);
+    }
     else if (e.name.endsWith('.md')) out.push(p);
   }
   return out;
@@ -54,7 +57,9 @@ for (const file of walk(wikiDir)) {
 
   const data = { ...fm.data };
   if (body.sources.length) data.sources = [...(data.sources || []), ...body.sources];
-  for (const n of [...fm.notes, ...body.notes]) notes.push(`${rel}: ${n}`);
+  const statusLine = raw.split(/\r?\n/).findIndex((line) => /^status\s*:/.test(line)) + 1;
+  for (const n of fm.notes) notes.push(`${rel}:${statusLine}: ${n}`);
+  for (const n of body.notes) notes.push(`${rel}: ${n}`);
 
   // Write only when a transform actually changed something, so an already-migrated file is
   // never reformatted just by being visited.

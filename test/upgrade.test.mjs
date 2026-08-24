@@ -77,7 +77,7 @@ test('configTransition never touches an existing block', () => {
 // --- e2e --------------------------------------------------------------------
 
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, cpSync, readFileSync, writeFileSync, rmSync, mkdirSync } from 'node:fs';
+import { mkdtempSync, cpSync, readFileSync, writeFileSync, rmSync, mkdirSync, symlinkSync, lstatSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -106,6 +106,7 @@ test('upgrade replaces engine files and preserves everything of the clone', () =
 
   const r = spawnSync('node', ['scripts/upgrade.mjs', '--from', ROOT], { cwd: dir, encoding: 'utf8' });
   assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stderr + r.stdout, /WARNING.*--from.*unverified/i);
 
   assert.ok(readFileSync(join(dir, 'lib/okf.mjs'), 'utf8').includes('typeViolation'),
     'the stale engine file must be replaced');
@@ -125,6 +126,25 @@ test('upgrade replaces engine files and preserves everything of the clone', () =
   const check = spawnSync('node', ['build.mjs', '--check'], { cwd: dir, encoding: 'utf8' });
   assert.equal(check.status, 0, `upgraded clone must pass check; stderr=${check.stderr}`);
   rmSync(dir, { recursive: true, force: true });
+});
+
+test('upgrade refuses an ENGINE target whose parent directory is a symlink', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'okf-up-symlink-'));
+  const outside = mkdtempSync(join(tmpdir(), 'okf-up-outside-'));
+  cpSync(join(ROOT, 'test/fixtures/minimal'), dir, { recursive: true });
+  cpSync(join(ROOT, 'scripts'), join(dir, 'scripts'), { recursive: true });
+  cpSync(join(ROOT, 'lib'), join(dir, 'lib'), { recursive: true });
+  mkdirSync(join(outside, 'docs'), { recursive: true });
+  writeFileSync(join(outside, 'docs', 'sentinel.txt'), 'must survive\n');
+  rmSync(join(dir, 'docs'), { recursive: true, force: true });
+  symlinkSync(join(outside, 'docs'), join(dir, 'docs'), 'dir');
+  const r = spawnSync('node', ['scripts/upgrade.mjs', '--from', ROOT], { cwd: dir, encoding: 'utf8' });
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /parent directory.*symlink.*docs/i);
+  assert.equal(readFileSync(join(outside, 'docs', 'sentinel.txt'), 'utf8'), 'must survive\n');
+  assert.equal(lstatSync(join(dir, 'docs')).isSymbolicLink(), true);
+  rmSync(dir, { recursive: true, force: true });
+  rmSync(outside, { recursive: true, force: true });
 });
 
 test('upgrade refuses to run without a release and changes nothing', () => {

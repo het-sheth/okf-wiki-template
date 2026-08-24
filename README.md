@@ -75,4 +75,4 @@ rm -rf ingest scripts/ingest.mjs
 
 To use it: `npm run ingest -- <source> --topic <topic> --title "..."` (requires
 [`uv`](https://docs.astral.sh/uv/)). It writes a `type: source` page to `raw/<topic>/` and drafts a
-`status: stub` concept in `wiki/<topic>/` for you to distill.
+concept in `wiki/<topic>/` with the configured default from `okf.statusDefault` for you to distill.

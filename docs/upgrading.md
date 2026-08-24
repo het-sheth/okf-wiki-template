@@ -12,6 +12,9 @@ npm run upgrade -- --release v2.1.0
 `--release` is required. There is no default release. Add `--dry-run` to print the planned work
 without writing anything.
 
+`--from <dir>` is for local development and testing only. It uses an unverified, already-present
+template tree, so do not use `--from` as a substitute for a release checksum.
+
 ## Verification before replacement
 
 The tool downloads the requested release into a staging directory and verifies its tarball against

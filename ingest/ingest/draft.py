@@ -1,9 +1,9 @@
-"""Build OKF stub pages from converted Markdown — extraction only, never invention."""
+"""Build OKF stub pages from converted Markdown: extraction only, never invention."""
 
 from .yamlsafe import yaml_str
 
-BANNER = "> [!NOTE] {{auto-extracted from source — not yet distilled}}"
-NO_OUTLINE = "> [!NOTE] {{auto-extracted from source — no outline was extracted; distillation pending}}"
+BANNER = "> [!NOTE] {{auto-extracted from source - not yet distilled}}"
+NO_OUTLINE = "> [!NOTE] {{auto-extracted from source - no outline was extracted; distillation pending}}"
 
 
 def extract_headings(markdown: str) -> list[str]:

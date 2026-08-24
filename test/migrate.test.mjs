@@ -61,6 +61,24 @@ test('a body with no Citations section is untouched', () => {
   assert.deepEqual(sources, []);
 });
 
+test('migrateBody preserves citation-section prose and handles a heading at document start', () => {
+  const input = '# Citations\n\nAudit prose.\n\n- Some Title, https://example.com/a\n\nClosing note.\n';
+  const { content, sources } = migrateBody(input, new Set());
+  assert.equal(sources.length, 1);
+  assert.ok(content.startsWith('\nAudit prose.'));
+  assert.ok(content.includes('Closing note.'));
+  assert.ok(!content.includes('# Citations'));
+  assert.ok(!content.includes('- Some Title'));
+});
+
+test('migrateBody anchors migrated markers to existing body text without invented prose', () => {
+  const { content } = migrateBody(
+    'Existing claim.\n\n# Citations\n\n- Some Title, https://example.com/a\n', new Set()
+  );
+  assert.ok(content.includes('Existing claim.[^example-com-a]'));
+  assert.ok(!content.includes('Sourced material.'));
+});
+
 test('migration is idempotent', () => {
   const once = migrateFrontmatter({ timestamp: '2026-01-01T00:00:00Z', status: 'solid' }, {});
   const twice = migrateFrontmatter(once.data, {});
@@ -147,7 +165,7 @@ test('parseStatusMap reads the CLI form and extends the default', () => {
 });
 
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, cpSync, readFileSync, writeFileSync, rmSync, symlinkSync } from 'node:fs';
+import { mkdtempSync, cpSync, readFileSync, writeFileSync, rmSync, symlinkSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -195,5 +213,28 @@ test('migrate never touches raw/ or reserved files', () => {
 
   assert.equal(readFileSync(join(dir, 'raw/source.md'), 'utf8'), rawBefore, 'raw/ is immutable');
   assert.equal(readFileSync(join(dir, 'wiki/index.md'), 'utf8'), idxBefore, 'reserved files untouched');
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('migrate skips symlinked Markdown files and reports each skipped path', () => {
+  const dir = migrateSandbox();
+  mkdirSync(join(dir, 'wiki', 'demo'), { recursive: true });
+  writeFileSync(join(dir, 'raw/source.md'), 'raw stays unchanged\n');
+  symlinkSync(join(dir, 'raw/source.md'), join(dir, 'wiki/demo/linked.md'));
+  const before = readFileSync(join(dir, 'raw/source.md'), 'utf8');
+  const r = spawnSync('node', ['scripts/migrate.mjs'], { cwd: dir, encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(readFileSync(join(dir, 'raw/source.md'), 'utf8'), before);
+  assert.match(r.stdout, /skipped symlink wiki\/demo\/linked\.md/);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('migrate notes include the line number for unmapped statuses', () => {
+  const dir = migrateSandbox();
+  const page = join(dir, 'wiki/demo/alpha.md');
+  writeFileSync(page, '---\ntype: concept\nstatus: mystery\n---\n\nbody\n');
+  const r = spawnSync('node', ['scripts/migrate.mjs'], { cwd: dir, encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /wiki\/demo\/alpha\.md:3:/);
   rmSync(dir, { recursive: true, force: true });
 });

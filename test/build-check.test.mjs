@@ -376,11 +376,20 @@ test('a past stale_after is not a check failure', () => {
 // this code ever runs, the same way it resolves a valid date. A value that never matches the
 // YAML timestamp grammar at all is the only kind of malformed input a frontmatter round trip
 // can still exercise.
-test('check fails on a malformed stale_after', () => {
+test('check rejects slash-formatted stale_after values', () => {
   expectCheckFails((dir) => writeFileSync(
     join(dir, 'wiki/demo/alpha.md'),
     '---\ntype: concept\ntitle: A\ndescription: d\nstale_after: 2027/01/01\n---\n\nbody\n'
   ), /not an ISO date/);
+});
+
+test('check deliberately accepts out-of-range YAML dates, as documented', () => {
+  const dir = sandbox();
+  writeFileSync(join(dir, 'wiki/demo/alpha.md'),
+    '---\ntype: concept\ntitle: A\ndescription: d\nstale_after: 2027-13-99\n---\n\nbody\n');
+  const r = run(dir, '--check');
+  clean(dir);
+  assert.equal(r.status, 0, `gray-matter coerces this YAML date; see docs/okf-profile.md; stderr=${r.stderr}`);
 });
 
 test('check fails on a status outside the configured vocabulary', () => {
@@ -445,7 +454,7 @@ test('build exits non-zero when validation fails, not just check', () => {
   assert.match(r.stderr, /broken link/);
 });
 
-test('build does not write a partial site/ when validation fails', () => {
+test('build leaves a fresh sandbox without a site/ when validation fails', () => {
   const dir = sandbox();
   writeFileSync(join(dir, 'wiki/demo/alpha.md'),
     '---\ntype: concept\ntitle: A\ndescription: d\n---\n\nSee [x](./does-not-exist.md).\n');
@@ -453,6 +462,16 @@ test('build does not write a partial site/ when validation fails', () => {
   const wrote = existsSync(join(dir, 'site'));
   clean(dir);
   assert.equal(wrote, false, 'a failed build must not leave a partial site/');
+});
+
+test('build honors custom reserved filenames from okf.reservedFiles', () => {
+  const dir = sandbox();
+  setOkf(dir, { reservedFiles: ['home.md', 'journal.md'] });
+  writeFileSync(join(dir, 'wiki/demo/home.md'),
+    '---\ntitle: Home\n---\n\nIntro\n');
+  const r = run(dir, '--check');
+  clean(dir);
+  assert.equal(r.status, 0, `custom reserved file should be exempt; stderr=${r.stderr}`);
 });
 
 // The test above passes vacuously on a fresh sandbox: site/ never existed. The stale case is the

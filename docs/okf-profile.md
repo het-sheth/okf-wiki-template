@@ -45,7 +45,7 @@ for its subject, so words in examples are not universal. `type` values come from
 | `okf.statusValues` | `stub`, `learning`, `researched`, `solid` | Defines the allowed values for a present `status`. The shipped template explicitly uses `draft`, `stable`, `deprecated`. |
 | `okf.statusDefault` | `stable` when that value is in `okf.statusValues`, otherwise `null` | Resolves the configured default for an absent `status`, or `null` to disable it. The profile lint permits an absent status and does not apply this value while checking. |
 | `okf.needsWorkStatus` | `stub` when that value is in `okf.statusValues`, otherwise the first vocabulary member | Chooses which explicit status receives the muted card treatment. It is separate from `okf.statusDefault`: one describes an absent status, while the other identifies work that needs attention. Set it to `null` to disable the treatment. |
-| `okf.reservedFiles` | `index.md`, `log.md` | Configuration accepted and returned by the resolver for the reserved-file vocabulary. The current generator's reserved-file checks are fixed to these two names. |
+| `okf.reservedFiles` | `index.md`, `log.md` | Controls the filenames that the generator treats as reserved during build and profile checks. |
 | `okf.archival` | `false` | Declares archival lifecycle policy. It does not turn `superseded_by` validation on or off. |
 | `okf.federation` | `false` | Enables resolution of cross-wiki links against discovered peer manifests. With it off, cross-wiki links are masked in output and not resolved. |
 | `okf.title` | `null` | Optional title used as the `title` field in `site/manifest.json`; the package name is used when it is absent. |

@@ -9,6 +9,7 @@
 // either fail or silently pull an unintended version.
 import {
   readFileSync, writeFileSync, cpSync, existsSync, rmSync, mkdtempSync, renameSync, mkdirSync,
+  lstatSync,
 } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -63,6 +64,7 @@ function stageRelease(tag) {
 const from = flag('--from');
 const tag = flag('--release');
 if (!from && !tag) die('pass --release <tag> (or --from <dir>). There is no default release.');
+if (from) console.error('WARNING: --from uses an unverified tree and is for local development and testing only.');
 const src = from ? from : stageRelease(tag);
 
 // --- 2. validate the staged tree before touching anything ------------------
@@ -70,6 +72,17 @@ for (const f of REQUIRED_RELEASE_FILES) {
   if (!existsSync(join(src, f))) die(`the release is incomplete: ${f} is missing. Nothing was changed.`);
 }
 const tmplPkg = JSON.parse(readFileSync(join(src, 'package.json'), 'utf8'));
+
+for (const p of ENGINE_PATHS) {
+  const parent = dirname(join(ROOT, p));
+  try {
+    if (lstatSync(parent).isSymbolicLink()) {
+      die(`ENGINE target parent directory is a symlink: ${parent}`);
+    }
+  } catch (e) {
+    if (e.code !== 'ENOENT') die(`could not inspect ENGINE target parent directory ${parent}: ${e.message}`);
+  }
+}
 
 if (DRY) {
   log('dry run. Would replace:');

@@ -1,10 +1,10 @@
 @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap');
 
 /* =====================================================================
-   course-wiki design system — "phosphor terminal"
+   course-wiki design system: "phosphor terminal"
    One source of style truth. Pages link this file and use its component
    classes; they never inline styles. Aesthetic: dark-first amber/green
-   CRT terminal — IBM Plex Mono headings, IBM Plex Sans body for long
+   CRT terminal: IBM Plex Mono headings, IBM Plex Sans body for long
    reading. Subtle grain + scanlines. Auto light "paper terminal" mode.
 
    SVG palette (use these in inline diagrams):
@@ -79,7 +79,7 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-/* grain + scanlines — subtle CRT atmosphere, above content but inert */
+/* grain + scanlines: subtle CRT atmosphere, above content but inert */
 body::before, body::after {
   content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 60;
 }

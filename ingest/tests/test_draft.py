@@ -27,7 +27,7 @@ def test_build_stub_with_headings_is_strict_profile():
     assert "# Citations" not in out
     assert "[^raw-source]" in out       # the source must be referenced, not just declared
     assert "raw/system-design/deck.md" in out
-    assert "auto-extracted from source — not yet distilled" in out
+    assert "auto-extracted from source - not yet distilled" in out
     assert "# Deck" in out and "## Intro" in out
 
 

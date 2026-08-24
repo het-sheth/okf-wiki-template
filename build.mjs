@@ -185,7 +185,9 @@ function collect() {
     const base = basename(file);
     const raw = readFileSync(file, 'utf8');
     const repoRel = rootRel(file);
-    if (isReserved(base) || isReservedPath(repoRel)) { reserved.push({ file, repoRel, base, raw }); continue; }
+    if (isReserved(base, CFG.reservedFiles) || repoRel === 'wiki/index.md' || isReservedPath(repoRel)) {
+      reserved.push({ file, repoRel, base, raw }); continue;
+    }
     const { data, content } = matter(raw);
     const topic = toPosix(relative(WIKI_DIR, file)).split('/')[0];
     concepts.push({ file, repoRel, topic, slug: basename(file, '.md'),
@@ -194,7 +196,7 @@ function collect() {
   const rawDocs = walk(RAW_DIR).map((file) => {
     const base = basename(file);
     const raw = readFileSync(file, 'utf8');
-    if (isReserved(base)) return { file, repoRel: rootRel(file), base, raw, reserved: true };
+    if (isReserved(base, CFG.reservedFiles)) return { file, repoRel: rootRel(file), base, raw, reserved: true };
     const { data } = matter(raw);
     return { file, repoRel: rootRel(file), data, reserved: false };
   });
@@ -212,6 +214,7 @@ function validate({ concepts, reserved, rawDocs }) {
   // legitimately carry example frontmatter, and journal notes are freeform.
   for (const r of [...reserved, ...rawDocs.filter((d) => d.reserved)]) {
     if (isReservedPath(r.repoRel)) continue;
+    if (CFG.reservedFiles.includes(r.base) && !['index.md', 'log.md'].includes(r.base)) continue;
     if (!hasFrontmatter(r.raw)) continue;
     // SPEC 12: the bundle-root index.md is the ONE place frontmatter is permitted, and only to
     // declare okf_version. Every other index.md, and any other key here, stays rejected.
