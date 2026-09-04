@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // okf-wiki-template generator: wiki/**/*.md -> site/ (deterministic, no LLM).
-// Strict OKF profile. Markdown in wiki/ is canonical; site/ is generated — never hand-edit it.
+// Strict OKF profile. Markdown in wiki/ is canonical; site/ is generated, never hand-edit it.
 import { readFileSync, writeFileSync, readdirSync, mkdirSync, existsSync, rmSync, cpSync, realpathSync } from 'node:fs';
 import { join, dirname, relative, basename, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -12,7 +12,10 @@ import {
   esc, escAttr, summary, isReserved, isReservedPath, typeViolation,
   isLocalMd, resolveLinkTarget, siteRelFromRepoRel,
   scanWikilinks, extractCrossLinks, withinWikiSiteRel,
+  prohibitedKeyViolations, citationsHeadingViolation, isoViolations, sourceViolations,
+  supersessionViolations, statusViolation,
 } from './lib/okf.mjs';
+import { resolveOkfConfig } from './lib/config.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const WIKI_DIR = join(ROOT, 'wiki');
@@ -22,19 +25,20 @@ const ASSETS_SRC = join(ROOT, 'assets');
 const CHECK = argv.includes('--check');
 const TOPICS = JSON.parse(readFileSync(join(ROOT, 'topics.json'), 'utf8'));
 const PKG = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'));
+const CFG = resolveOkfConfig(PKG.okf);
 const WIKI_NAME = PKG.name;
-const WIKI_TITLE = (PKG.okf && PKG.okf.title) || WIKI_NAME;
+const WIKI_TITLE = CFG.title || WIKI_NAME;
 
 // --- federation (cross-wiki) config -----------------------------------------
 // Opt-in, DEFAULT OFF (R3): a wiki only resolves cross-wiki links to real hrefs when its own
 // package.json sets `okf.federation: true`. With it off, cross-wiki links are still parsed and
-// masked — the raw token and peer/topic/slug names never reach the generated HTML.
-const FEDERATION = !!(PKG.okf && PKG.okf.federation);
+// masked: the raw token and peer/topic/slug names never reach the generated HTML.
+const FEDERATION = CFG.federation;
 // peers.json discovery: OKF_PEERS env var wins, else the default sibling hub path.
 const PEERS_PATH = env.OKF_PEERS || join(ROOT, '..', 'knowledge-hub', 'peers.json');
 
 // peer name -> { manifest, siteRoot } for every federated peer whose manifest is present.
-// Empty when federation is off or peers.json / manifests are missing — callers degrade gracefully.
+// Empty when federation is off or peers.json / manifests are missing: callers degrade gracefully.
 function loadPeers() {
   const peers = new Map();
   if (!FEDERATION || !existsSync(PEERS_PATH)) return peers;
@@ -85,7 +89,7 @@ function walk(dir) {
 
 // --- link handling via marked tokens (skips code blocks/spans; parses parens correctly) ---
 
-// Return local .md link hrefs found in a markdown string (images excluded — they are
+// Return local .md link hrefs found in a markdown string (images excluded: they are
 // `image` tokens, not `link`). Exported for tests.
 export function localMdLinksIn(md) {
   const out = [];
@@ -123,10 +127,10 @@ renderer.link = function ({ href, title, tokens }) {
 };
 marked.use({ renderer });
 
-// Replace every `[[...]]` wikilink with an <a> (or masked text) BEFORE marked runs — mirrors
+// Replace every `[[...]]` wikilink with an <a> (or masked text) BEFORE marked runs: mirrors
 // education-wiki's preprocess approach. `outDir` is the rendered page's site dir; `topic` is the
 // page's topic (for resolving bare [[slug]]). Cross-wiki links are ALWAYS masked when federation
-// is off: only the human label (or a neutral placeholder) is emitted — never the peer/topic/slug.
+// is off: only the human label (or a neutral placeholder) is emitted, never the peer/topic/slug.
 function preprocessWikilinks(md, { topic, outDir }) {
   return String(md).replace(/\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g, (raw, target, label) => {
     const [w] = scanWikilinks(raw);
@@ -181,7 +185,9 @@ function collect() {
     const base = basename(file);
     const raw = readFileSync(file, 'utf8');
     const repoRel = rootRel(file);
-    if (isReserved(base) || isReservedPath(repoRel)) { reserved.push({ file, repoRel, base, raw }); continue; }
+    if (isReserved(base, CFG.reservedFiles) || repoRel === 'wiki/index.md' || isReservedPath(repoRel)) {
+      reserved.push({ file, repoRel, base, raw }); continue;
+    }
     const { data, content } = matter(raw);
     const topic = toPosix(relative(WIKI_DIR, file)).split('/')[0];
     concepts.push({ file, repoRel, topic, slug: basename(file, '.md'),
@@ -190,7 +196,7 @@ function collect() {
   const rawDocs = walk(RAW_DIR).map((file) => {
     const base = basename(file);
     const raw = readFileSync(file, 'utf8');
-    if (isReserved(base)) return { file, repoRel: rootRel(file), base, raw, reserved: true };
+    if (isReserved(base, CFG.reservedFiles)) return { file, repoRel: rootRel(file), base, raw, reserved: true };
     const { data } = matter(raw);
     return { file, repoRel: rootRel(file), data, reserved: false };
   });
@@ -204,17 +210,41 @@ function validate({ concepts, reserved, rawDocs }) {
   const conceptPaths = new Set(concepts.map((c) => c.repoRel)); // linkable targets
 
   // reserved files (index.md / log.md, in wiki/ or raw/) must have no frontmatter.
-  // Directory-reserved files (_templates/ scaffolding, journal/ inbox) are exempt — templates
+  // Directory-reserved files (_templates/ scaffolding, journal/ inbox) are exempt: templates
   // legitimately carry example frontmatter, and journal notes are freeform.
   for (const r of [...reserved, ...rawDocs.filter((d) => d.reserved)]) {
     if (isReservedPath(r.repoRel)) continue;
-    if (hasFrontmatter(r.raw)) problems.push(`${r.repoRel} -> reserved file (${r.base}) must have no frontmatter`);
+    if (CFG.reservedFiles.includes(r.base) && !['index.md', 'log.md'].includes(r.base)) continue;
+    if (!hasFrontmatter(r.raw)) continue;
+    // SPEC 12: the bundle-root index.md is the ONE place frontmatter is permitted, and only to
+    // declare okf_version. Every other index.md, and any other key here, stays rejected.
+    if (r.repoRel === 'wiki/index.md') {
+      const keys = Object.keys(matter(r.raw).data);
+      if (keys.length === 1 && keys[0] === 'okf_version') continue;
+      problems.push(`${r.repoRel} -> bundle-root index.md may declare only \`okf_version\`; every other key is prohibited by this profile`);
+      continue;
+    }
+    problems.push(`${r.repoRel} -> reserved file (${r.base}) must have no frontmatter`);
   }
   // concept type rules
   for (const c of concepts) {
-    const v = typeViolation({ area: 'wiki', type: c.data.type });
+    const v = typeViolation({ area: 'wiki', type: c.data.type, conceptTypes: CFG.conceptTypes });
     if (v) problems.push(`${c.key} -> ${v}`);
   }
+  // v0.2 profile: prohibited legacy forms, frontmatter shapes, source and footnote integrity,
+  // and status vocabulary membership.
+  for (const c of concepts) {
+    for (const m of prohibitedKeyViolations(c.data)) problems.push(`${c.key} -> ${m}`);
+    const heading = citationsHeadingViolation(c.content);
+    if (heading) problems.push(`${c.key} -> ${heading}`);
+    for (const m of isoViolations(c.data)) problems.push(`${c.key} -> ${m}`);
+    for (const m of sourceViolations(c.data, c.content)) problems.push(`${c.key} -> ${m}`);
+    const sv = statusViolation(c.data, CFG.statusValues);
+    if (sv) problems.push(`${c.key} -> ${sv}`);
+  }
+  problems.push(
+    ...supersessionViolations(concepts.map((c) => ({ key: c.key, supersededBy: c.data.superseded_by })))
+  );
   for (const d of rawDocs) {
     if (d.reserved) continue;
     const v = typeViolation({ area: 'raw', type: d.data.type });
@@ -307,8 +337,12 @@ function render({ concepts, reserved }) {
   const byTopic = (topic) => concepts.filter((c) => c.topic === topic)
     .sort((a, b) => (a.data.order ?? 99) - (b.data.order ?? 99)
       || String(a.data.title || a.slug).localeCompare(String(b.data.title || b.slug)));
+  // The muted card marks work in progress. The emitted class is a stable `needs-work` rather
+  // than the status word, so assets/wiki.css does not depend on the configured vocabulary.
+  const cardClass = (status) =>
+    CFG.needsWorkStatus && status === CFG.needsWorkStatus ? 'card needs-work' : 'card';
   const card = (hrefPrefix, c) =>
-    `<a class="card${c.data.status === 'stub' ? ' stub' : ''}" href="${hrefPrefix}${c.slug}.html"><div class="card-title">${esc(c.data.title || c.slug)}</div><div class="card-desc">${esc(summary(c.data))}</div></a>`;
+    `<a class="${cardClass(c.data.status)}" href="${hrefPrefix}${c.slug}.html"><div class="card-title">${esc(c.data.title || c.slug)}</div><div class="card-desc">${esc(summary(c.data))}</div></a>`;
 
   // concept pages
   for (const c of concepts) {
@@ -349,7 +383,7 @@ ${sections}`;
 }
 
 // --- manifest ---------------------------------------------------------------
-// site/manifest.json — the deterministic, no-LLM federation descriptor the hub reads.
+// site/manifest.json: the deterministic, no-LLM federation descriptor the hub reads.
 // `id` is the stable cross-wiki identifier (topic/slug); `links` is the page's outgoing
 // cross-wiki references, which the hub turns into "referenced by" backlinks.
 export function buildManifest(concepts) {
@@ -375,7 +409,17 @@ function main() {
   const problems = validate(collected);
   if (problems.length) {
     console.error('OKF check problems:\n  ' + problems.join('\n  '));
-    if (CHECK) process.exit(1);
+    // Non-zero in BOTH modes. Build mode used to fall through and render, so a bundle that
+    // failed validation still published and still exited 0.
+    //
+    // A previous successful build leaves a COMPLETE site/ behind, so exiting here without
+    // clearing it publishes the last valid tree as though it were current. site/ is generated
+    // and regenerable from the last good commit, so removing it is the safe direction.
+    if (!CHECK && existsSync(SITE_DIR)) {
+      rmSync(SITE_DIR, { recursive: true, force: true });
+      console.error('removed the now-stale site/; it no longer matches wiki/');
+    }
+    process.exit(1);
   }
   if (CHECK) {
     console.log(`check ok: ${collected.concepts.length} concepts, ${problems.length} problems`);

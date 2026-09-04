@@ -4,6 +4,8 @@ import {
   esc, escAttr, summary, isReserved, isReservedPath, typeViolation,
   isLocalMd, resolveLinkTarget, siteRelFromRepoRel,
   parseWikilink, scanWikilinks, extractWikilinks, extractCrossLinks, withinWikiSiteRel,
+  prohibitedKeyViolations, citationsHeadingViolation, isoViolations, sourceViolations,
+  supersessionViolations, statusViolation,
 } from '../lib/okf.mjs';
 
 test('esc escapes HTML metacharacters', () => {
@@ -41,6 +43,18 @@ test('typeViolation enforces area -> type for concepts', () => {
   assert.match(typeViolation({ area: 'raw', type: 'concept' }), /expected type "source"/);
   assert.match(typeViolation({ area: 'wiki', type: undefined }), /missing required `type`/);
   assert.match(typeViolation({ area: 'wiki', type: 'banana' }), /expected one of/);
+});
+
+test('typeViolation accepts a custom concept vocabulary', () => {
+  assert.equal(typeViolation({ area: 'wiki', type: 'lesson', conceptTypes: ['lesson'] }), null);
+  assert.match(
+    typeViolation({ area: 'wiki', type: 'concept', conceptTypes: ['lesson'] }),
+    /expected one of lesson/
+  );
+});
+
+test('typeViolation without a vocabulary keeps the built-in default', () => {
+  assert.equal(typeViolation({ area: 'wiki', type: 'concept' }), null);
 });
 
 test('isLocalMd recognizes local .md links only', () => {
@@ -116,4 +130,99 @@ test('extractCrossLinks returns peer:topic/slug ids only', () => {
 test('withinWikiSiteRel resolves bare slug against the current topic', () => {
   assert.equal(withinWikiSiteRel('welcome', 'getting-started'), 'getting-started/welcome.html');
   assert.equal(withinWikiSiteRel('other/page', 'getting-started'), 'other/page.html');
+});
+
+test('timestamp is prohibited and names its replacement', () => {
+  const v = prohibitedKeyViolations({ timestamp: '2026-01-01T00:00:00Z' });
+  assert.equal(v.length, 1);
+  assert.match(v[0], /`timestamp` is prohibited by this profile; use `generated.at`/);
+});
+
+test('legacy_timestamp is allowed because it claims nothing', () => {
+  assert.deepEqual(prohibitedKeyViolations({ legacy_timestamp: '2026-01-01T00:00:00Z' }), []);
+});
+
+test('a Citations heading is prohibited and names its replacement', () => {
+  assert.match(citationsHeadingViolation('body\n\n# Citations\n\n- x\n'), /use `sources:`/);
+  assert.equal(citationsHeadingViolation('body\n\n## Citations in context\n'), null);
+  assert.equal(citationsHeadingViolation('```\n# Citations\n```\n'), null);
+});
+
+test('generated and verified must carry by and at', () => {
+  assert.deepEqual(isoViolations({ generated: { by: 'human:x', at: '2026-01-01T00:00:00Z' } }), []);
+  assert.match(isoViolations({ generated: { at: '2026-01-01T00:00:00Z' } })[0], /`generated.by`/);
+  assert.match(isoViolations({ generated: { by: 'x', at: 'nope' } })[0], /not ISO 8601/);
+  assert.match(isoViolations({ verified: { by: 'x', at: '2026-01-01T00:00:00Z' } })[0], /must be a list/);
+  assert.deepEqual(isoViolations({ stale_after: '2027-01-01' }), []);
+  assert.match(isoViolations({ stale_after: '2027-13-99' })[0], /not an ISO date/);
+});
+
+// gray-matter's default YAML engine resolves an unquoted timestamp-shaped frontmatter scalar
+// into a real Date before this code ever runs, so these two functions must accept a Date
+// instance directly, not just a string. `new Date('nonsense')` is still `instanceof Date`
+// (an Invalid Date), so it must still be caught as a violation.
+test('isoViolations accepts a valid Date instance for stale_after', () => {
+  assert.deepEqual(isoViolations({ stale_after: new Date('2027-01-01') }), []);
+});
+
+test('isoViolations rejects an Invalid Date instance for stale_after', () => {
+  assert.match(isoViolations({ stale_after: new Date('nonsense') })[0], /not an ISO date/);
+});
+
+test('isoViolations accepts a valid Date instance for generated.at', () => {
+  assert.deepEqual(
+    isoViolations({ generated: { by: 'human:x', at: new Date('2026-01-01T00:00:00Z') } }),
+    []
+  );
+});
+
+test('isoViolations rejects an Invalid Date instance for generated.at', () => {
+  assert.match(
+    isoViolations({ generated: { by: 'x', at: new Date('nonsense') } })[0],
+    /not ISO 8601/
+  );
+});
+
+test('source ids must be unique and every footnote must resolve', () => {
+  const data = { sources: [{ id: 'a', resource: 'r', title: 't' }] };
+  assert.deepEqual(sourceViolations(data, 'claim[^a]\n\n[^a]: note\n'), []);
+  assert.match(sourceViolations(data, 'claim[^ghost]\n')[0], /\[\^ghost\]/);
+  assert.match(sourceViolations(data, 'no markers here\n')[0], /orphaned/);
+  const dupe = {
+    sources: [{ id: 'a', resource: 'r', title: 't' }, { id: 'a', resource: 'r2', title: 't2' }],
+  };
+  assert.match(sourceViolations(dupe, 'x[^a]\n')[0], /duplicate source id/);
+  assert.match(sourceViolations({ sources: [{ id: 'a' }] }, 'x[^a]\n')[0], /missing `resource`/);
+});
+
+test('supersession rejects missing targets, self-links, and cycles of any length', () => {
+  const ok = [{ key: 't/old', supersededBy: 't/new' }, { key: 't/new', supersededBy: undefined }];
+  assert.deepEqual(supersessionViolations(ok), []);
+
+  assert.match(supersessionViolations([{ key: 't/a', supersededBy: 't/ghost' }])[0], /no such page/);
+  assert.match(supersessionViolations([{ key: 't/a', supersededBy: 't/a' }])[0], /points at itself/);
+
+  const two = [{ key: 't/a', supersededBy: 't/b' }, { key: 't/b', supersededBy: 't/a' }];
+  assert.match(supersessionViolations(two).join('\n'), /cycle/);
+
+  const three = [
+    { key: 't/a', supersededBy: 't/b' },
+    { key: 't/b', supersededBy: 't/c' },
+    { key: 't/c', supersededBy: 't/a' },
+  ];
+  assert.match(supersessionViolations(three).join('\n'), /cycle/);
+});
+
+test('statusViolation flags a status outside the configured vocabulary', () => {
+  const v = statusViolation({ status: 'solid' }, ['draft', 'stable', 'deprecated']);
+  assert.match(v, /`status: solid`/);
+  assert.match(v, /draft, stable, deprecated/);
+});
+
+test('statusViolation allows a member of the vocabulary', () => {
+  assert.equal(statusViolation({ status: 'stable' }, ['draft', 'stable', 'deprecated']), null);
+});
+
+test('statusViolation allows an absent status', () => {
+  assert.equal(statusViolation({}, ['draft', 'stable', 'deprecated']), null);
 });

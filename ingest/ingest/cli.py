@@ -1,5 +1,6 @@
 """`python -m ingest <src> --topic <t> [--engine ...] [--title ...]`."""
 import argparse
+import json
 import sys
 import tempfile
 from datetime import datetime, timezone
@@ -12,6 +13,25 @@ from .rawstore import RawCollision, write_raw
 from .slug import slugify
 
 TEXT_EXTS = {".md", ".markdown", ".txt"}
+
+LEGACY_STATUS_VALUES = ["stub", "learning", "researched", "solid"]
+
+
+def resolve_status(root) -> str:
+    """The status an ingested stub carries. A wiki root with no package.json (a bare
+    --wiki-root, as the integration tests use) falls back to the legacy vocabulary's
+    first value, which is what this pipeline has always emitted."""
+    pkg = root / "package.json"
+    if not pkg.exists():
+        return LEGACY_STATUS_VALUES[0]
+    okf = json.loads(pkg.read_text()).get("okf", {})
+    values = okf.get("statusValues") or LEGACY_STATUS_VALUES
+    explicit = okf.get("statusDefault")
+    if explicit:
+        return explicit
+    if "stable" in values:
+        return "stable"
+    return values[0]
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -64,6 +84,7 @@ def main(argv: list[str] | None = None) -> int:
         raw_path=rel_raw,
         headings=extract_headings(markdown),
         timestamp=datetime.now(timezone.utc).isoformat(),
+        status=resolve_status(root),
     )
     wiki_page.write_text(stub)
     print(f"raw written: {rel_raw}; stub drafted: {wiki_page.relative_to(root)}")

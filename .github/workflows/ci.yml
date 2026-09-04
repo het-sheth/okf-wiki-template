@@ -1,0 +1,43 @@
+name: ci
+on: [push, pull_request]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '20' }
+
+      # A real install from the lockfile, in the checked-out tree. `npm test` runs the migration
+      # idempotence and upgrade simulation suites, so those are covered here too.
+      - run: npm ci
+      - run: npm run check
+      - run: npm test
+      - run: npm run build
+
+      - name: normative block matches its canonical source
+        run: |
+          awk '/profile-min:begin/{f=1;next} /profile-min:end/{f=0} f' AGENTS.md > /tmp/block
+          diff /tmp/block docs/profile-min.md
+          test "$(wc -l < docs/profile-min.md)" -le 25
+
+      - name: pointer targets exist
+        run: |
+          for f in $(grep -ohE 'docs/[a-z-]+\.md' AGENTS.md README.md | sort -u); do
+            test -f "$f" || { echo "missing pointer target: $f"; exit 1; }
+          done
+
+      - name: site is not tracked
+        run: |
+          if git ls-files --error-unmatch site >/dev/null 2>&1; then
+            echo "site/ must not be tracked"; exit 1
+          fi
+
+  ingest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv run --extra dev pytest -v
+        working-directory: ingest

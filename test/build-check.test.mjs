@@ -50,9 +50,12 @@ test('buildManifest emits the federation shape with outgoing cross-wiki links', 
 
 // --- e2e helpers ------------------------------------------------------------
 
-function sandbox() {
+const FIXTURES = join(ROOT, 'test/fixtures');
+
+function sandbox(fixture = 'minimal') {
   const dir = mkdtempSync(join(tmpdir(), 'okf-'));
-  for (const p of ['build.mjs', 'lib', 'wiki', 'raw', 'assets', 'topics.json', 'package.json']) {
+  cpSync(join(FIXTURES, fixture), dir, { recursive: true });
+  for (const p of ['build.mjs', 'lib', 'assets']) {
     cpSync(join(ROOT, p), join(dir, p), { recursive: true });
   }
   symlinkSync(join(ROOT, 'node_modules'), join(dir, 'node_modules'), 'dir');
@@ -63,13 +66,15 @@ const runEnv = (dir, env, ...args) =>
   spawnSync('node', ['build.mjs', ...args], { cwd: dir, encoding: 'utf8', env: { ...process.env, ...env } });
 const clean = (dir) => rmSync(dir, { recursive: true, force: true });
 
-// Set package.json `okf.federation` in a sandbox (default off).
-function enableFederation(dir) {
+// Merge keys into the sandbox package.json `okf` block.
+function setOkf(dir, okf) {
   const pkgPath = join(dir, 'package.json');
   const pkg = JSON.parse(readFileSync(pkgPath, 'utf8'));
-  pkg.okf = { ...(pkg.okf || {}), federation: true };
+  pkg.okf = { ...(pkg.okf || {}), ...okf };
   writeFileSync(pkgPath, JSON.stringify(pkg, null, 2));
 }
+
+function enableFederation(dir) { setOkf(dir, { federation: true }); }
 
 // Write a minimal peer wiki: a peers.json pointing at one peer whose site/manifest.json has `pages`.
 // Returns the absolute peers.json path (for OKF_PEERS).
@@ -103,15 +108,15 @@ test('build emits valid HTML with a rewritten, resolving link', () => {
   const dir = sandbox();
   const r = run(dir);
   assert.equal(r.status, 0, r.stderr);
-  const page = join(dir, 'site/getting-started/writing-concepts.html');
+  const page = join(dir, 'site/demo/alpha.html');
   const html = readFileSync(page, 'utf8');
   const ok = html.includes('<!DOCTYPE html>') && html.includes('<head>') && html.includes('<body>');
-  // the /wiki/.../welcome.md link must be rewritten to a relative .html that exists
-  const m = html.match(/href="([^"]*welcome\.html)"/);
+  // the ./beta.md link must be rewritten to a relative .html that exists
+  const m = html.match(/href="([^"]*beta\.html)"/);
   const resolves = m && existsSync(join(dirname(page), m[1]));
   clean(dir);
   assert.ok(ok, 'page must have DOCTYPE/head/body');
-  assert.ok(m, 'welcome link must be rewritten to .html');
+  assert.ok(m, 'beta link must be rewritten to .html');
   assert.ok(resolves, 'rewritten link target must exist');
 });
 
@@ -143,36 +148,36 @@ function expectCheckFails(mutate, rx) {
 
 test('check fails on a broken local link', () => {
   expectCheckFails((dir) => writeFileSync(
-    join(dir, 'wiki/getting-started/welcome.md'),
+    join(dir, 'wiki/demo/alpha.md'),
     '---\ntype: concept\ntitle: W\ndescription: d\n---\n\nSee [x](./does-not-exist.md).\n'
   ), /broken link/);
 });
 
 test('check fails when a reserved file has frontmatter', () => {
   expectCheckFails((dir) => writeFileSync(
-    join(dir, 'wiki/getting-started/index.md'),
+    join(dir, 'wiki/demo/index.md'),
     '---\ntype: topic\n---\n\n# Getting started\n'
   ), /must have no frontmatter/);
 });
 
 test('check fails on an invalid concept type', () => {
   expectCheckFails((dir) => writeFileSync(
-    join(dir, 'wiki/getting-started/welcome.md'),
+    join(dir, 'wiki/demo/alpha.md'),
     '---\ntype: banana\ntitle: W\ndescription: d\n---\n\nbody\n'
   ), /expected one of/);
 });
 
 test('check fails on a missing concept type', () => {
   expectCheckFails((dir) => writeFileSync(
-    join(dir, 'wiki/getting-started/welcome.md'),
+    join(dir, 'wiki/demo/alpha.md'),
     '---\ntitle: W\ndescription: d\n---\n\nbody\n'
   ), /missing required `type`/);
 });
 
 test('check fails on a raw file with the wrong type', () => {
   expectCheckFails((dir) => {
-    mkdirSync(join(dir, 'raw/getting-started'), { recursive: true });
-    writeFileSync(join(dir, 'raw/getting-started/note.md'), '---\ntype: concept\ntitle: n\n---\n\nsrc\n');
+    mkdirSync(join(dir, 'raw/demo'), { recursive: true });
+    writeFileSync(join(dir, 'raw/demo/note.md'), '---\ntype: concept\ntitle: n\n---\n\nsrc\n');
   }, /expected type "source"/);
 });
 
@@ -180,33 +185,33 @@ test('check fails on a raw file with the wrong type', () => {
 
 test('build renders a within-wiki [[topic/slug]] wikilink to a resolving .html', () => {
   const dir = sandbox();
-  writeConcept(dir, 'getting-started/welcome', 'See [[getting-started/writing-concepts]].');
+  writeConcept(dir, 'demo/alpha', 'See [[demo/beta]].');
   const r = run(dir);
-  const page = join(dir, 'site/getting-started/welcome.html');
+  const page = join(dir, 'site/demo/alpha.html');
   const html = readFileSync(page, 'utf8');
-  const m = html.match(/href="([^"]*writing-concepts\.html)"/);
+  const m = html.match(/href="([^"]*beta\.html)"/);
   const resolves = m && existsSync(join(dirname(page), m[1]));
   clean(dir);
   assert.equal(r.status, 0, r.stderr);
-  assert.ok(m, 'wikilink must render to a writing-concepts.html href');
+  assert.ok(m, 'wikilink must render to a beta.html href');
   assert.ok(resolves, 'rendered wikilink target must exist on disk');
   assert.ok(!html.includes('[['), 'no raw [[ token may survive into HTML');
 });
 
 test('build renders a bare [[slug]] against the current topic', () => {
   const dir = sandbox();
-  writeConcept(dir, 'getting-started/welcome', 'See [[writing-concepts|the rules]].');
+  writeConcept(dir, 'demo/alpha', 'See [[beta|the rules]].');
   const r = run(dir);
-  const html = readFileSync(join(dir, 'site/getting-started/welcome.html'), 'utf8');
+  const html = readFileSync(join(dir, 'site/demo/alpha.html'), 'utf8');
   clean(dir);
   assert.equal(r.status, 0, r.stderr);
-  assert.match(html, /href="writing-concepts\.html">the rules<\/a>/);
+  assert.match(html, /href="beta\.html">the rules<\/a>/);
 });
 
 test('check fails on a within-wiki wikilink to a non-existent page', () => {
   expectCheckFails(
-    (dir) => writeConcept(dir, 'getting-started/welcome', 'See [[getting-started/nope]].'),
-    /\[\[getting-started\/nope\]\] \(no such page\)/
+    (dir) => writeConcept(dir, 'demo/alpha', 'See [[demo/nope]].'),
+    /\[\[demo\/nope\]\] \(no such page\)/
   );
 });
 
@@ -214,17 +219,17 @@ test('check fails on a within-wiki wikilink to a non-existent page', () => {
 
 test('check fails on a malformed cross-wiki wikilink even with federation off', () => {
   expectCheckFails(
-    (dir) => writeConcept(dir, 'getting-started/welcome', 'See [[peer-wiki:bareslug]].'),
+    (dir) => writeConcept(dir, 'demo/alpha', 'See [[peer-wiki:bareslug]].'),
     /malformed wikilink/
   );
 });
 
 test('cross-wiki link is masked (no peer/topic/slug) when federation is OFF', () => {
   const dir = sandbox();
-  writeConcept(dir, 'getting-started/welcome',
+  writeConcept(dir, 'demo/alpha',
     'See [[education-wiki:agentic-engineering/overview|Agents overview]].');
   const r = run(dir);
-  const html = readFileSync(join(dir, 'site/getting-started/welcome.html'), 'utf8');
+  const html = readFileSync(join(dir, 'site/demo/alpha.html'), 'utf8');
   clean(dir);
   assert.equal(r.status, 0, r.stderr);
   assert.match(html, /Agents overview/, 'human label must render');
@@ -236,9 +241,9 @@ test('cross-wiki link is masked (no peer/topic/slug) when federation is OFF', ()
 
 test('cross-wiki link with no label masks to a neutral placeholder when OFF', () => {
   const dir = sandbox();
-  writeConcept(dir, 'getting-started/welcome', 'See [[education-wiki:agentic-engineering/overview]].');
+  writeConcept(dir, 'demo/alpha', 'See [[education-wiki:agentic-engineering/overview]].');
   const r = run(dir);
-  const html = readFileSync(join(dir, 'site/getting-started/welcome.html'), 'utf8');
+  const html = readFileSync(join(dir, 'site/demo/alpha.html'), 'utf8');
   clean(dir);
   assert.equal(r.status, 0, r.stderr);
   assert.match(html, /\(linked page\)/);
@@ -248,13 +253,13 @@ test('cross-wiki link with no label masks to a neutral placeholder when OFF', ()
 test('cross-wiki link resolves to a peer href when federation is ON', () => {
   const dir = sandbox();
   enableFederation(dir);
-  writeConcept(dir, 'getting-started/welcome',
+  writeConcept(dir, 'demo/alpha',
     'See [[education-wiki:agentic-engineering/overview|Agents overview]].');
   const peersPath = writePeer(dir, 'education-wiki',
     [{ id: 'agentic-engineering/overview', title: 'Overview',
        href: 'agentic-engineering/overview.html' }]);
   const r = runEnv(dir, { OKF_PEERS: peersPath });
-  const html = readFileSync(join(dir, 'site/getting-started/welcome.html'), 'utf8');
+  const html = readFileSync(join(dir, 'site/demo/alpha.html'), 'utf8');
   clean(dir);
   assert.equal(r.status, 0, r.stderr);
   // href points into the peer's site/ (relative path climbs out of this wiki)
@@ -264,7 +269,7 @@ test('cross-wiki link resolves to a peer href when federation is ON', () => {
 test('check fails on an unresolved cross-wiki link when federation is ON', () => {
   const dir = sandbox();
   enableFederation(dir);
-  writeConcept(dir, 'getting-started/welcome', 'See [[education-wiki:agentic-engineering/ghost]].');
+  writeConcept(dir, 'demo/alpha', 'See [[education-wiki:agentic-engineering/ghost]].');
   const peersPath = writePeer(dir, 'education-wiki',
     [{ id: 'agentic-engineering/overview', title: 'Overview', href: 'agentic-engineering/overview.html' }]);
   const r = runEnv(dir, { OKF_PEERS: peersPath }, '--check');
@@ -276,8 +281,212 @@ test('check fails on an unresolved cross-wiki link when federation is ON', () =>
 test('cross-wiki check is skipped (link masked, build succeeds) when federation is OFF', () => {
   const dir = sandbox();
   // points at a ghost page, but federation off => not resolved, not checked
-  writeConcept(dir, 'getting-started/welcome', 'See [[education-wiki:agentic-engineering/ghost|x]].');
+  writeConcept(dir, 'demo/alpha', 'See [[education-wiki:agentic-engineering/ghost|x]].');
   const r = run(dir, '--check');
   clean(dir);
   assert.equal(r.status, 0, `cross-wiki link must not fail check when off; stderr=${r.stderr}`);
+});
+
+// --- e2e: config-driven vocabularies ----------------------------------------
+
+test('check accepts a custom conceptTypes vocabulary', () => {
+  const dir = sandbox();
+  setOkf(dir, { conceptTypes: ['lesson'] });
+  for (const slug of ['alpha', 'beta']) {
+    writeFileSync(join(dir, `wiki/demo/${slug}.md`),
+      `---\ntype: lesson\ntitle: ${slug}\ndescription: d\n---\n\nbody\n`);
+  }
+  const r = run(dir, '--check');
+  clean(dir);
+  assert.equal(r.status, 0, `expected pass; stderr=${r.stderr}`);
+});
+
+test('an unconfigured clone still mutes a stub card', () => {
+  const dir = sandbox();
+  writeFileSync(join(dir, 'wiki/demo/alpha.md'),
+    '---\ntype: concept\ntitle: A\ndescription: d\nstatus: stub\n---\n\nbody\n');
+  const r = run(dir);
+  const html = readFileSync(join(dir, 'site/index.html'), 'utf8');
+  clean(dir);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(html, /class="card needs-work"/);
+});
+
+test('a custom vocabulary mutes its own needs-work status', () => {
+  const dir = sandbox();
+  setOkf(dir, { statusValues: ['wip', 'done'], needsWorkStatus: 'wip' });
+  writeFileSync(join(dir, 'wiki/demo/alpha.md'),
+    '---\ntype: concept\ntitle: A\ndescription: d\nstatus: wip\n---\n\nbody\n');
+  const r = run(dir);
+  const html = readFileSync(join(dir, 'site/index.html'), 'utf8');
+  clean(dir);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(html, /class="card needs-work"/);
+  assert.ok(!html.includes('class="card wip"'), 'the status word must not become a class');
+});
+
+test('check fails on a prohibited timestamp key', () => {
+  expectCheckFails((dir) => writeFileSync(
+    join(dir, 'wiki/demo/alpha.md'),
+    '---\ntype: concept\ntitle: A\ndescription: d\ntimestamp: 2026-01-01T00:00:00Z\n---\n\nbody\n'
+  ), /`timestamp` is prohibited by this profile/);
+});
+
+test('check fails on a prohibited Citations heading', () => {
+  expectCheckFails((dir) => writeFileSync(
+    join(dir, 'wiki/demo/alpha.md'),
+    '---\ntype: concept\ntitle: A\ndescription: d\n---\n\nbody\n\n# Citations\n\n- x\n'
+  ), /use `sources:`/);
+});
+
+test('check fails on an unresolved footnote marker', () => {
+  expectCheckFails((dir) => writeFileSync(
+    join(dir, 'wiki/demo/alpha.md'),
+    '---\ntype: concept\ntitle: A\ndescription: d\n---\n\nclaim[^ghost]\n'
+  ), /footnote \[\^ghost\]/);
+});
+
+test('check fails on a dangling superseded_by regardless of archival config', () => {
+  expectCheckFails((dir) => writeFileSync(
+    join(dir, 'wiki/demo/alpha.md'),
+    '---\ntype: concept\ntitle: A\ndescription: d\nsuperseded_by: demo/ghost\n---\n\nbody\n'
+  ), /no such page/);
+});
+
+test('check fails on a two-page superseded_by cycle', () => {
+  expectCheckFails((dir) => {
+    writeFileSync(join(dir, 'wiki/demo/alpha.md'),
+      '---\ntype: concept\ntitle: A\ndescription: d\nsuperseded_by: demo/beta\n---\n\nbody\n');
+    writeFileSync(join(dir, 'wiki/demo/beta.md'),
+      '---\ntype: concept\ntitle: B\ndescription: d\nsuperseded_by: demo/alpha\n---\n\nbody\n');
+  }, /cycle/);
+});
+
+test('a past stale_after is not a check failure', () => {
+  const dir = sandbox();
+  writeFileSync(join(dir, 'wiki/demo/alpha.md'),
+    '---\ntype: concept\ntitle: A\ndescription: d\nstale_after: 2020-01-01\n---\n\nbody\n');
+  const r = run(dir, '--check');
+  clean(dir);
+  assert.equal(r.status, 0, `staleness is advisory; stderr=${r.stderr}`);
+});
+
+// A YAML-shaped-but-out-of-range date (e.g. month 13) is not a useful malformed case here:
+// gray-matter's default YAML engine resolves it into a real (silently rolled-over) Date before
+// this code ever runs, the same way it resolves a valid date. A value that never matches the
+// YAML timestamp grammar at all is the only kind of malformed input a frontmatter round trip
+// can still exercise.
+test('check rejects slash-formatted stale_after values', () => {
+  expectCheckFails((dir) => writeFileSync(
+    join(dir, 'wiki/demo/alpha.md'),
+    '---\ntype: concept\ntitle: A\ndescription: d\nstale_after: 2027/01/01\n---\n\nbody\n'
+  ), /not an ISO date/);
+});
+
+test('check deliberately accepts out-of-range YAML dates, as documented', () => {
+  const dir = sandbox();
+  writeFileSync(join(dir, 'wiki/demo/alpha.md'),
+    '---\ntype: concept\ntitle: A\ndescription: d\nstale_after: 2027-13-99\n---\n\nbody\n');
+  const r = run(dir, '--check');
+  clean(dir);
+  assert.equal(r.status, 0, `gray-matter coerces this YAML date; see docs/okf-profile.md; stderr=${r.stderr}`);
+});
+
+test('check fails on a status outside the configured vocabulary', () => {
+  expectCheckFails((dir) => {
+    setOkf(dir, { statusValues: ['draft', 'stable', 'deprecated'] });
+    writeFileSync(join(dir, 'wiki/demo/alpha.md'),
+      '---\ntype: concept\ntitle: A\ndescription: d\nstatus: solid\n---\n\nbody\n');
+  }, /`status: solid`.*draft, stable, deprecated/s);
+});
+
+test('a page with no status does not fail the status check', () => {
+  const dir = sandbox();
+  setOkf(dir, { statusValues: ['draft', 'stable', 'deprecated'] });
+  writeFileSync(join(dir, 'wiki/demo/alpha.md'),
+    '---\ntype: concept\ntitle: A\ndescription: d\n---\n\nbody\n');
+  const r = run(dir, '--check');
+  clean(dir);
+  assert.equal(r.status, 0, r.stderr);
+});
+
+test('the legacy fixture fails check, and migrate makes it pass', () => {
+  const dir = sandbox('legacy-v01');
+  cpSync(join(ROOT, 'scripts'), join(dir, 'scripts'), { recursive: true });
+  const before = run(dir, '--check');
+  assert.equal(before.status, 1, 'the v0.1 fixture must be rejected');
+  const mig = spawnSync('node', ['scripts/migrate.mjs'], { cwd: dir, encoding: 'utf8' });
+  assert.equal(mig.status, 0, mig.stderr);
+  const after = run(dir, '--check');
+  clean(dir);
+  assert.equal(after.status, 0, `migrated fixture must pass; stderr=${after.stderr}`);
+});
+
+// --- e2e: okf_version on the bundle root ------------------------------------
+
+test('the bundle-root index.md may declare only okf_version', () => {
+  const dir = sandbox();
+  writeFileSync(join(dir, 'wiki/index.md'), '---\nokf_version: "0.2"\n---\n\n# Demo wiki\n');
+  const r = run(dir, '--check');
+  clean(dir);
+  assert.equal(r.status, 0, `expected pass; stderr=${r.stderr}`);
+});
+
+test('the bundle-root index.md rejects any other key', () => {
+  expectCheckFails((dir) => writeFileSync(
+    join(dir, 'wiki/index.md'), '---\nokf_version: "0.2"\ntitle: Nope\n---\n\n# Demo\n'
+  ), /may declare only `okf_version`/);
+});
+
+test('a non-root index.md still rejects all frontmatter', () => {
+  expectCheckFails((dir) => writeFileSync(
+    join(dir, 'wiki/demo/index.md'), '---\nokf_version: "0.2"\n---\n\n# Demo\n'
+  ), /must have no frontmatter/);
+});
+
+test('build exits non-zero when validation fails, not just check', () => {
+  const dir = sandbox();
+  writeFileSync(join(dir, 'wiki/demo/alpha.md'),
+    '---\ntype: concept\ntitle: A\ndescription: d\n---\n\nSee [x](./does-not-exist.md).\n');
+  const r = run(dir);
+  clean(dir);
+  assert.equal(r.status, 1, 'a bundle that fails validation must fail the build');
+  assert.match(r.stderr, /broken link/);
+});
+
+test('build leaves a fresh sandbox without a site/ when validation fails', () => {
+  const dir = sandbox();
+  writeFileSync(join(dir, 'wiki/demo/alpha.md'),
+    '---\ntype: concept\ntitle: A\ndescription: d\n---\n\nSee [x](./does-not-exist.md).\n');
+  run(dir);
+  const wrote = existsSync(join(dir, 'site'));
+  clean(dir);
+  assert.equal(wrote, false, 'a failed build must not leave a partial site/');
+});
+
+test('build honors custom reserved filenames from okf.reservedFiles', () => {
+  const dir = sandbox();
+  setOkf(dir, { reservedFiles: ['home.md', 'journal.md'] });
+  writeFileSync(join(dir, 'wiki/demo/home.md'),
+    '---\ntitle: Home\n---\n\nIntro\n');
+  const r = run(dir, '--check');
+  clean(dir);
+  assert.equal(r.status, 0, `custom reserved file should be exempt; stderr=${r.stderr}`);
+});
+
+// The test above passes vacuously on a fresh sandbox: site/ never existed. The stale case is the
+// one that bites, because the leftover site/ is a COMPLETE render of the previous, valid tree and
+// reads as current output.
+test('a failed build removes a site/ left by an earlier successful build', () => {
+  const dir = sandbox();
+  const first = run(dir);
+  assert.equal(first.status, 0, first.stderr);
+  assert.ok(existsSync(join(dir, 'site/demo/alpha.html')), 'the first build must publish');
+  writeFileSync(join(dir, 'wiki/demo/alpha.md'),
+    '---\ntype: concept\ntitle: A\ndescription: d\n---\n\nSee [x](./does-not-exist.md).\n');
+  const second = run(dir);
+  const stale = existsSync(join(dir, 'site'));
+  clean(dir);
+  assert.equal(second.status, 1, 'the second build must fail');
+  assert.equal(stale, false, 'a stale site/ must not survive a failed build');
 });

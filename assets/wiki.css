@@ -1,10 +1,10 @@
 @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap');
 
 /* =====================================================================
-   course-wiki design system — "phosphor terminal"
+   course-wiki design system: "phosphor terminal"
    One source of style truth. Pages link this file and use its component
    classes; they never inline styles. Aesthetic: dark-first amber/green
-   CRT terminal — IBM Plex Mono headings, IBM Plex Sans body for long
+   CRT terminal: IBM Plex Mono headings, IBM Plex Sans body for long
    reading. Subtle grain + scanlines. Auto light "paper terminal" mode.
 
    SVG palette (use these in inline diagrams):
@@ -79,7 +79,7 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-/* grain + scanlines — subtle CRT atmosphere, above content but inert */
+/* grain + scanlines: subtle CRT atmosphere, above content but inert */
 body::before, body::after {
   content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 60;
 }
@@ -243,8 +243,8 @@ figcaption { font-family: var(--mono); font-size: .76rem; color: var(--text-fain
 .card .card-title { font-family: var(--mono); font-weight: 600; margin-bottom: 4px; color: var(--text); }
 .card:hover .card-title { color: var(--accent); }
 .card .card-desc { font-size: .85rem; color: var(--text-soft); line-height: 1.5; }
-.card.stub { opacity: .48; }
-.card.stub .card-title::after { content: "  \00b7 planned"; font-size: .7rem; color: var(--text-faint); font-weight: 400; }
+.card.needs-work { opacity: .48; }
+.card.needs-work .card-title::after { content: "  \00b7 planned"; font-size: .7rem; color: var(--text-faint); font-weight: 400; }
 
 /* ---------- timeline ---------- */
 .timeline { list-style: none; padding: 0; margin: 1em 0; }

@@ -1,8 +1,3 @@
-# OKF Wiki: schema and conventions
-
-A Markdown-canonical knowledge base. Write pages under `wiki/<topic>/`, then run `npm run check`.
-
-<!-- okf-template:profile-min:begin -->
 <!-- Managed by `npm run upgrade`. Edit docs/profile-min.md in the template, not here. -->
 ## OKF profile (normative)
 
@@ -22,17 +17,3 @@ Markdown in `wiki/` is the source of truth; `site/` is generated, never hand-edi
   can reject a bundle that is still valid OKF.
 
 Full field tables, every `okf.*` key, and worked examples: `docs/okf-profile.md`.
-<!-- okf-template:profile-min:end -->
-
-## This wiki
-
-Topics live in `topics.json`. Replace this section with your own domain conventions: what each
-topic covers, naming rules, and anything a contributor to this subject needs that the profile
-above does not say.
-
-## Layout
-
-- `wiki/<topic>/<slug>.md` concept pages; `wiki/<topic>/index.md` optional intro prose.
-- `wiki/index.md` the bundle root, declaring `okf_version` and nothing else.
-- `raw/<topic>/` immutable source material. Read, never rewrite.
-- `site/` generated. `npm run build` only, never by hand.
